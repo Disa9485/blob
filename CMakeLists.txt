@@ -74,14 +74,21 @@ add_executable(blob
     ConversationMemoryService.cpp
     ImGuiLayer.cpp
     ChatPanel.cpp
-    delaunator.cpp
-    PsdCharacterLoader.cpp
     AudioEngine.cpp
     SentenceDetector.cpp
     FaissMemoryIndex.cpp
     PiperTts.cpp
     SpeechPipeline.cpp
     VoiceEffects.cpp
+    PhysicsBodyFactory.cpp
+    PhysicsScene.cpp
+    GameRenderer.cpp
+    RenderRegistry.cpp
+    delaunator.cpp
+    PsdLoader.cpp
+    SceneConfig.cpp
+    PsdAssembler.cpp
+    SoftBodyInteractor.cpp
 )
 
 target_include_directories(blob PRIVATE

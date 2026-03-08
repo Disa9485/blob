@@ -1,5 +1,5 @@
-// PsdCharacterLoader.cpp
-#include "PsdCharacterLoader.hpp"
+// PsdLoader.cpp
+#include "PsdLoader.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -110,9 +110,9 @@ namespace
     }
 }
 
-bool PsdCharacterLoader::LoadCharacterPsd(const std::string& psdPath, CharacterPsd& out, std::string& error)
+bool PsdLoader::LoadPsd(const std::string& psdPath, Psd& out, std::string& error)
 {
-    out = CharacterPsd{};
+    out = Psd{};
     error.clear();
 
     // psd_sdk uses its own allocator + file abstraction in the samples. :contentReference[oaicite:6]{index=6}

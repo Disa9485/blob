@@ -4,6 +4,7 @@
 #include "AppConfig.hpp"
 #include "ConversationMemoryService.hpp"
 #include "LlamaChat.hpp"
+#include "SoftBodyInteractor.hpp"
 #include "SpeechPipeline.hpp"
 
 #include "imgui.h"
@@ -21,6 +22,7 @@ public:
         SpeechPipeline& speech,
         AppConfig& config,
         ConversationMemoryService* memory,
+        physics::SoftBodyInteractor* soft_body_interactor,
         int64_t session_id);
 
     ~ChatPanel();
@@ -44,6 +46,7 @@ private:
     SpeechPipeline& speech_;
     AppConfig& config_;
     ConversationMemoryService* memory_ = nullptr;
+    physics::SoftBodyInteractor* soft_body_interactor_ = nullptr;
 
     std::vector<Entry> messages_;
 

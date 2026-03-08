@@ -7,6 +7,12 @@
 #include "SpeechPipeline.hpp"
 #include "ConversationMemoryService.hpp"
 #include "SaveLauncherPanel.hpp"
+#include "PhysicsScene.hpp"
+#include "GameRenderer.hpp"
+#include "PhysicsBodyFactory.hpp"
+#include "PsdAssembler.hpp"
+#include "SceneConfig.hpp"
+#include "SoftBodyInteractor.hpp"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -17,6 +23,8 @@
 #include <string>
 #include <cstdint>
 #include <random>
+#include <unordered_map>
+#include <vector>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -68,7 +76,7 @@ bool setWindowIcons(GLFWwindow* window)
 int main() {
     std::cout << "Running.\n";
 
-    const std::string template_config_path = "app_config.json";
+    const std::string template_config_path = "default_app_config.json";
     const std::string saves_root = "saves";
 
     constexpr int launcher_width = 720;
@@ -120,9 +128,12 @@ int main() {
     std::unique_ptr<LlamaChatLoader> loader;
     std::unique_ptr<ConversationMemoryService> memory_service;
     std::unique_ptr<ChatPanel> panel;
+    std::unique_ptr<physics::PhysicsScene> physics_scene;
+    std::unique_ptr<render::GameRenderer> game_renderer;
+    physics::PsdAssembly psd_assembly;
+    std::unique_ptr<physics::SoftBodyInteractor> soft_interactor;
 
     AppConfig active_config;
-    std::string active_config_path;
 
     std::random_device rd;
     std::mt19937_64 rng(rd());
@@ -130,11 +141,89 @@ int main() {
 
     bool game_started = false;
     bool pause_menu_open = false;
+
+    double last_frame_time = glfwGetTime();
+    double mouse_x = 0.0;
+    double mouse_y = 0.0;
+
+    std::string current_scene_id;
+
+    bool prev_left_down = false;
     bool esc_was_down = false;
+    bool r_was_down = false;
+
+    auto clearGameScene = [&]() {
+        if (soft_interactor && physics_scene) {
+            soft_interactor->shutdown(physics_scene->space());
+        }
+        soft_interactor.reset();
+        
+        if (physics_scene && game_renderer) {
+            physics::PsdAssembler::destroyAssembly(
+                physics_scene->space(),
+                *game_renderer,
+                psd_assembly
+            );
+        }
+        physics_scene.reset();
+    };
+
+    auto loadSceneById = [&](const std::string& sceneId) -> bool {
+        if (!physics_scene || !game_renderer) {
+            return false;
+        }
+
+        physics::SceneFiles files;
+        std::string files_error;
+        if (!physics::PsdAssembler::resolveSceneFiles(sceneId, files, files_error)) {
+            std::cerr << "Failed to resolve scene files for '" << sceneId << "': " << files_error << "\n";
+            return false;
+        }
+
+        physics::SceneConfig scene_config_data;
+        std::string scene_config_error;
+        if (!physics::SceneConfig::loadFromFile(files.configPath, scene_config_data, scene_config_error)) {
+            std::cerr << "Failed to load scene config for '" << sceneId << "': " << scene_config_error << "\n";
+            return false;
+        }
+
+        physics_scene->setWallsEnabled(scene_config_data.scene.walls);
+
+        if (soft_interactor) {
+            soft_interactor->shutdown(physics_scene->space());
+        }
+
+        physics::PsdAssembler::destroyAssembly(
+            physics_scene->space(),
+            *game_renderer,
+            psd_assembly
+        );
+
+        int fbw = 0;
+        int fbh = 0;
+        glfwGetFramebufferSize(window, &fbw, &fbh);
+
+        std::string assembly_error;
+        if (!physics::PsdAssembler::buildScene(
+                physics_scene->space(),
+                *game_renderer,
+                sceneId,
+                fbw,
+                fbh,
+                psd_assembly,
+                assembly_error)) {
+            std::cerr << "Failed to build scene '" << sceneId << "': " << assembly_error << "\n";
+            return false;
+        }
+
+        return true;
+    };
 
     auto resetToLauncher = [&]() {
         pause_menu_open = false;
 
+        clearGameScene();
+        current_scene_id.clear();
         panel.reset();
         memory_service.reset();
         loader.reset();
@@ -142,7 +231,6 @@ int main() {
         audio.reset();
 
         active_config = AppConfig{};
-        active_config_path.clear();
 
         launcher = SaveLauncherPanel(template_config_path, saves_root);
         std::string reset_error;
@@ -160,12 +248,39 @@ int main() {
         session_id = static_cast<int64_t>(new_rng());
     };
 
+    game_renderer = std::make_unique<render::GameRenderer>();
+    std::string render_error;
+    if (!game_renderer->initialize(render_error)) {
+        std::cerr << "Failed to initialize GameRenderer: " << render_error << "\n";
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
+    soft_interactor = std::make_unique<physics::SoftBodyInteractor>();
+    physics::SoftBodyInteractor::Config drag_cfg;
+    drag_cfg.pickRadiusPx = 28.0f;
+    drag_cfg.springStiffness = 2000.0f;
+    drag_cfg.springDamping = 100.0f;
+    drag_cfg.maxForce = (cpFloat)2e2;
+    soft_interactor->setConfig(drag_cfg);
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         const bool esc_down = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
         const bool esc_pressed = esc_down && !esc_was_down;
         esc_was_down = esc_down;
+
+        const bool r_down = glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS;
+        const bool r_pressed = r_down && !r_was_down;
+        r_was_down = r_down;
+
+        if (game_started && !pause_menu_open && r_pressed && !current_scene_id.empty()) {
+            if (!loadSceneById(current_scene_id)) {
+                std::cerr << "Failed to reload current scene: " << current_scene_id << "\n";
+            }
+        }
 
         if (game_started && esc_pressed) {
             pause_menu_open = !pause_menu_open;
@@ -180,7 +295,67 @@ int main() {
         glfwGetFramebufferSize(window, &display_w, &display_h);
 
         glViewport(0, 0, display_w, display_h);
-        glClear(GL_COLOR_BUFFER_BIT);
+
+        if (game_started && game_renderer) {
+            double cursor_x = 0.0;
+            double cursor_y = 0.0;
+            glfwGetCursorPos(window, &cursor_x, &cursor_y);
+            mouse_x = cursor_x;
+            mouse_y = cursor_y;
+
+            int win_w = 0;
+            int win_h = 0;
+            glfwGetWindowSize(window, &win_w, &win_h);
+
+            const bool left_down = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            const bool left_pressed = left_down && !prev_left_down;
+            const bool left_released = !left_down && prev_left_down;
+            prev_left_down = left_down;
+
+            const float mx = (win_w > 0) ? (float(mouse_x) * float(display_w) / float(win_w)) : 0.0f;
+            const float my = (win_h > 0) ? (float(mouse_y) * float(display_h) / float(win_h)) : 0.0f;
+
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool allow_scene_mouse =
+                game_started &&
+                !pause_menu_open &&
+                !io.WantCaptureMouse &&
+                physics_scene &&
+                soft_interactor;
+
+            if (allow_scene_mouse) {
+                if (left_pressed) {
+                    soft_interactor->beginDrag(*physics_scene, psd_assembly, mx, my);
+                } else if (left_down) {
+                    soft_interactor->updateDrag(*physics_scene, mx, my);
+                } else if (left_released) {
+                    soft_interactor->endDrag(physics_scene->space());
+                }
+            } else if (soft_interactor && physics_scene && soft_interactor->isDragging()) {
+                soft_interactor->endDrag(physics_scene->space());
+            }
+
+            if (physics_scene) {
+                physics_scene->resizeBounds(display_w, display_h);
+                double now = glfwGetTime();
+                double dt = now - last_frame_time;
+                last_frame_time = now;
+                physics_scene->step(dt);
+            }
+
+            for (physics::RenderPart& part : psd_assembly.parts) {
+                if (part.kind == physics::PartKind::Soft) {
+                    game_renderer->updateSoftRenderMesh(part);
+                }
+            }
+
+            game_renderer->beginFrame(display_w, display_h);
+            game_renderer->renderParts(psd_assembly.renderItems);
+            game_renderer->endFrame();
+        } else {
+            glClearColor(20.0f / 255.0f, 22.0f / 255.0f, 26.0f / 255.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
 
         imgui.beginFrame();
 
@@ -200,8 +375,6 @@ int main() {
                     std::cerr << "Failed to reload save config after open timestamp update: " << reload_error << "\n";
                     active_config = launcher.selectedConfig();
                 }
-
-                active_config_path = launched_save.config_path;
 
                 GLFWmonitor* primary_monitor = glfwGetPrimaryMonitor();
                 const GLFWvidmode* video_mode = primary_monitor ? glfwGetVideoMode(primary_monitor) : nullptr;
@@ -259,6 +432,22 @@ int main() {
                     std::cerr << "Memory initialization failed: " << memory_error << "\n";
                 }
 
+                physics_scene = std::make_unique<physics::PhysicsScene>();
+                int fbw = 0;
+                int fbh = 0;
+                glfwGetFramebufferSize(window, &fbw, &fbh);
+
+                physics::PhysicsSceneConfig scene_config;
+                if (!physics_scene->initialize(fbw, fbh, scene_config)) {
+                    std::cerr << "Failed to initialize physics scene.\n";
+                }
+
+                std::string assembly_error;
+                current_scene_id = "robot_idle";
+                if (!loadSceneById(current_scene_id)) {
+                    std::cerr << "Failed to assemble PSD character.\n";
+                }
+
                 pause_menu_open = false;
                 game_started = true;
             }
@@ -269,6 +458,7 @@ int main() {
                     *speech,
                     active_config,
                     memory_service.get(),
+                    soft_interactor.get(),
                     session_id
                 );
             }
@@ -356,6 +546,9 @@ int main() {
     loader.reset();
     speech.reset();
     audio.reset();
+
+    clearGameScene();
+    game_renderer.reset();
 
     imgui.shutdown();
     glfwDestroyWindow(window);

@@ -195,7 +195,8 @@ namespace {
     std::string buildAugmentedSystemPrompt(
         const std::string& dynamic_base_prompt,
         const std::string& current_display_time,
-        const std::string& retrieved_memories)
+        const std::string& retrieved_memories,
+        const std::string& touch_summary)
     {
         std::ostringstream out;
 
@@ -209,6 +210,11 @@ namespace {
         if (!retrieved_memories.empty()) {
             out << "\n\nYour potential relevant memories:\n"
                 << retrieved_memories;
+        }
+
+        if (!touch_summary.empty()) {
+            out << "\n\n"
+                << touch_summary;
         }
 
         return out.str();
@@ -231,11 +237,13 @@ ChatPanel::ChatPanel(
     SpeechPipeline& speech,
     AppConfig& config,
     ConversationMemoryService* memory,
+    physics::SoftBodyInteractor* soft_body_interactor,
     int64_t session_id)
     : chat_(chat)
     , speech_(speech)
     , config_(config)
     , memory_(memory)
+    , soft_body_interactor_(soft_body_interactor)
     , session_id_(session_id) {
     messages_.push_back({ "system", "", "", "Communications Established." });
 }
@@ -279,10 +287,16 @@ void ChatPanel::startGeneration(const std::string& user_text) {
         }
     }
 
+    std::string touch_summary;
+    if (soft_body_interactor_) {
+        touch_summary = soft_body_interactor_->consumeTouchedPartsSentence(config_.userName());
+    }
+
     const std::string augmented_system_prompt = buildAugmentedSystemPrompt(
         config_.buildDynamicSystemPrompt(),
         user_display_ts,
-        retrieved_memory_text
+        retrieved_memory_text,
+        touch_summary
     );
 
     {
@@ -305,7 +319,6 @@ void ChatPanel::startGeneration(const std::string& user_text) {
             user_text,
             memory_error
         );
-        // optional: surface memory_error in UI later
     }
 
     generating_ = true;
@@ -418,8 +431,6 @@ void ChatPanel::draw() {
         const ImVec2 current_pos = ImGui::GetWindowPos();
         const ImVec2 current_size = ImGui::GetWindowSize();
 
-        // Only persist real, usable sizes. This prevents minimize/restore
-        // from overwriting the cached size with the minimum window size.
         if (current_size.x > 64.0f && current_size.y > 64.0f) {
             last_window_pos_ = current_pos;
             last_window_size_ = current_size;
