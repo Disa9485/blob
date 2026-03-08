@@ -1,0 +1,5 @@
+build/
+assets/
+third_party/
+vcpkg_installed/
+dnu*

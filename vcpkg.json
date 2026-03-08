@@ -1,0 +1,12 @@
+{
+  "name": "blob",
+  "dependencies": [
+    "chipmunk",
+    "glad",
+    "glfw3",
+    "delaunator-cpp",
+    "nlohmann-json",
+    "openal-soft",
+    "faiss"
+  ]
+}
