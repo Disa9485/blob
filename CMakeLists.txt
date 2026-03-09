@@ -89,6 +89,7 @@ add_executable(blob
     SceneConfig.cpp
     PsdAssembler.cpp
     SoftBodyInteractor.cpp
+    RoomManager.cpp
 )
 
 target_include_directories(blob PRIVATE

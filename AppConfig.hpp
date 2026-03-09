@@ -70,6 +70,7 @@ struct AppConfig {
 
     std::string model_path = "model.gguf";
     std::string last_opened_iso8601;
+    std::string current_room = "lab";
     WindowConfig window;
     std::vector<std::string> static_system_prompt = {
         "You are named ",

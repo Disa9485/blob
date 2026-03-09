@@ -324,24 +324,26 @@ void ChatPanel::startGeneration(const std::string& user_text) {
     generating_ = true;
 
     worker_ = std::thread([this, user_text, augmented_system_prompt, assistant_message_index]() {
+        SentenceDetector detector;
+
         const bool ok = chat_.generateStreamWithSystemPrompt(
             user_text,
             augmented_system_prompt,
-            [this](const std::string& piece) {
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    if (!messages_.empty()) {
-                        messages_.back().text += piece;
-                        scroll_to_bottom_ = true;
-                    }
+            [this, &detector](const std::string& piece) {
+                detector.pushToken(piece);
+
+                while (detector.hasSentence()) {
+                    appendAssistantSentence(detector.popSentence());
                 }
 
-                speech_.pushToken(piece);
                 return true;
             }
         );
 
-        speech_.flushText();
+        const std::string tail = detector.flushRemainder();
+        if (!tail.empty()) {
+            appendAssistantSentence(tail);
+        }
 
         std::string assistant_text;
         std::string assistant_iso_ts;
@@ -350,7 +352,10 @@ void ChatPanel::startGeneration(const std::string& user_text) {
             std::lock_guard<std::mutex> lock(mutex_);
             if (!ok) {
                 if (!messages_.empty()) {
-                    messages_.back().text += "\n[generation failed]";
+                    if (!messages_.back().text.empty()) {
+                        messages_.back().text += "\n";
+                    }
+                    messages_.back().text += "[generation failed]";
                     scroll_to_bottom_ = true;
                 }
             }
@@ -375,6 +380,22 @@ void ChatPanel::startGeneration(const std::string& user_text) {
 
         generating_ = false;
     });
+}
+
+void ChatPanel::appendAssistantSentence(const std::string& sentence) {
+    if (sentence.empty()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!messages_.empty() && messages_.back().role == "assistant") {
+            messages_.back().text = messages_.back().text + " " + sentence;
+            scroll_to_bottom_ = true;
+        }
+    }
+
+    speech_.pushSentence(sentence);
 }
 
 void ChatPanel::draw() {

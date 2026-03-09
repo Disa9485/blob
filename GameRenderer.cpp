@@ -1,3 +1,4 @@
+// GameRenderer.cpp
 #include "GameRenderer.hpp"
 
 #include <cmath>
@@ -69,14 +70,19 @@ bool GameRenderer::initialize(std::string& error) {
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)(2 * sizeof(float)));
 
     glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glUseProgram(program_);
     glUniform1i(uTexLoc_, 0);
+    glUseProgram(0);
 
+    backgroundTexture_ = 0;
     return true;
 }
 
 void GameRenderer::shutdown() {
+    backgroundTexture_ = 0;
+
     if (quadEbo_) {
         glDeleteBuffers(1, &quadEbo_);
         quadEbo_ = 0;
@@ -186,9 +192,38 @@ void GameRenderer::beginFrame(int framebufferWidth, int framebufferHeight) {
     glActiveTexture(GL_TEXTURE0);
 }
 
+void GameRenderer::setBackgroundTexture(GLuint texture) {
+    backgroundTexture_ = texture;
+}
+
+void GameRenderer::clearBackgroundTexture() {
+    backgroundTexture_ = 0;
+}
+
+void GameRenderer::renderBackground() {
+    if (!backgroundTexture_ || framebufferWidth_ <= 0 || framebufferHeight_ <= 0) {
+        return;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, backgroundTexture_);
+    glBindVertexArray(quadVao_);
+
+    updateQuadVBO_AxisAligned(
+        0.0f,
+        0.0f,
+        static_cast<float>(framebufferWidth_),
+        static_cast<float>(framebufferHeight_),
+        0.0f, 0.0f,
+        1.0f, 1.0f
+    );
+
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+}
+
 void GameRenderer::endFrame() {
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
 }
 
 bool GameRenderer::initializeSoftRenderMesh(physics::RenderPart& part, std::string& error) {
@@ -280,6 +315,24 @@ void GameRenderer::destroySoftRenderMesh(physics::RenderPart& part) {
 
     part.softRender.indexCount = 0;
     part.softRender.vdata.clear();
+}
+
+void GameRenderer::updateQuadVBO_AxisAligned(
+    float x0, float y0,
+    float x1, float y1,
+    float u0, float v0,
+    float u1, float v1
+) {
+    const float vdata[16] = {
+        x0, y0, u0, v0,
+        x1, y0, u1, v0,
+        x1, y1, u1, v1,
+        x0, y1, u0, v1
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, quadVbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vdata), vdata);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void GameRenderer::updateQuadVBO_Rotated(

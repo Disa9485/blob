@@ -3,7 +3,6 @@
 
 #include "AudioEngine.hpp"
 #include "PiperTts.hpp"
-#include "SentenceDetector.hpp"
 #include "AppConfig.hpp"
 
 #include <condition_variable>
@@ -11,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 class SpeechPipeline {
 public:
@@ -29,8 +29,7 @@ public:
 
     void shutdown();
 
-    void pushToken(const std::string& token);
-    void flushText();
+    void pushSentence(const std::string& sentence);
 
     // call every frame on main thread
     void update();
@@ -41,7 +40,6 @@ private:
 private:
     AudioEngine* m_audio = nullptr;
     PiperTts m_tts;
-    SentenceDetector m_detector;
     TtsWarpConfig m_warp_config;
 
     struct ReadyClip {

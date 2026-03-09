@@ -80,7 +80,7 @@ bool SentenceDetector::tryExtractSentence() {
 
 bool SentenceDetector::isSentenceTerminator(std::size_t index) const {
     const char c = m_buffer[index];
-    if (c != '.' && c != '!' && c != '?' && c != ',' && c != ';') {
+    if (c != '.' && c != '!' && c != '?') {
         return false;
     }
 

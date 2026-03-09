@@ -51,24 +51,17 @@ void SpeechPipeline::shutdown() {
     m_audio = nullptr;
 }
 
-void SpeechPipeline::pushToken(const std::string& token) {
-    m_detector.pushToken(token);
+void SpeechPipeline::pushSentence(const std::string& sentence) {
+    if (sentence.empty()) {
+        return;
+    }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-    while (m_detector.hasSentence()) {
-        m_sentence_queue.push_back(m_detector.popSentence());
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_sentence_queue.push_back(sentence);
     }
 
     m_cv.notify_one();
-}
-
-void SpeechPipeline::flushText() {
-    const std::string tail = m_detector.flushRemainder();
-    if (!tail.empty()) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_sentence_queue.push_back(tail);
-        m_cv.notify_one();
-    }
 }
 
 void SpeechPipeline::update() {
@@ -76,10 +69,8 @@ void SpeechPipeline::update() {
         return;
     }
 
-    // First clean up any sources that have finished playback.
     m_audio->update();
 
-    // If something is still playing, leave queued clips alone.
     if (m_audio->isPlaying()) {
         return;
     }

@@ -81,6 +81,7 @@ namespace {
         return json{
             { "model_path", config.model_path },
             { "last_opened_iso8601", config.last_opened_iso8601 },
+            { "current_room", config.current_room },
             { "window", {
                 { "width", config.window.width },
                 { "height", config.window.height },
@@ -163,6 +164,7 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
     try {
         readIfPresent(j, "model_path", out_config.model_path);
         readIfPresent(j, "last_opened_iso8601", out_config.last_opened_iso8601);
+        readIfPresent(j, "current_room", out_config.current_room);
 
         if (auto it = j.find("window"); it != j.end() && it->is_object()) {
             const json& w = *it;
@@ -246,6 +248,11 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
 
     if (out_config.model_path.empty()) {
         out_error = "model_path must not be empty.";
+        return false;
+    }
+
+    if (out_config.current_room.empty()) {
+        out_error = "current_room must not be empty.";
         return false;
     }
 

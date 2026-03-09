@@ -6,6 +6,7 @@
 #include "LlamaChat.hpp"
 #include "SoftBodyInteractor.hpp"
 #include "SpeechPipeline.hpp"
+#include "SentenceDetector.hpp"
 
 #include "imgui.h"
 
@@ -41,6 +42,7 @@ private:
     };
 
     void startGeneration(const std::string& user_text);
+    void appendAssistantSentence(const std::string& sentence);
 
     LlamaChat& chat_;
     SpeechPipeline& speech_;

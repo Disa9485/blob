@@ -6,6 +6,7 @@
 
 #include <glad/glad.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,11 @@ public:
     void shutdown();
 
     void beginFrame(int framebufferWidth, int framebufferHeight);
+
+    void setBackgroundTexture(GLuint texture);
+    void clearBackgroundTexture();
+    void renderBackground();
+
     void renderParts(const std::vector<physics::RenderItem>& items);
     void endFrame();
 
@@ -35,11 +41,19 @@ public:
 private:
     GLuint compileShader(GLenum type, const char* src, std::string& error);
     GLuint createProgram(const char* vsSrc, const char* fsSrc, std::string& error);
+
     void updateQuadVBO_Rotated(
         float cx, float cy,
         float hw, float hh,
         float angleRad,
         float u0, float v0, float u1, float v1
+    );
+
+    void updateQuadVBO_AxisAligned(
+        float x0, float y0,
+        float x1, float y1,
+        float u0, float v0,
+        float u1, float v1
     );
 
     GLuint program_ = 0;
@@ -49,6 +63,8 @@ private:
     GLuint quadVao_ = 0;
     GLuint quadVbo_ = 0;
     GLuint quadEbo_ = 0;
+
+    GLuint backgroundTexture_ = 0;
 
     int framebufferWidth_ = 0;
     int framebufferHeight_ = 0;

@@ -13,6 +13,7 @@
 #include "PsdAssembler.hpp"
 #include "SceneConfig.hpp"
 #include "SoftBodyInteractor.hpp"
+#include "RoomManager.hpp"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -25,8 +26,8 @@
 #include <random>
 #include <unordered_map>
 #include <vector>
+#include <optional>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 bool setWindowIcons(GLFWwindow* window)
@@ -132,6 +133,8 @@ int main() {
     std::unique_ptr<render::GameRenderer> game_renderer;
     physics::PsdAssembly psd_assembly;
     std::unique_ptr<physics::SoftBodyInteractor> soft_interactor;
+    std::unique_ptr<rooms::RoomManager> room_manager;
+    std::optional<SaveEntry> active_save;
 
     AppConfig active_config;
 
@@ -229,6 +232,11 @@ int main() {
         loader.reset();
         speech.reset();
         audio.reset();
+        active_save.reset();
+
+        if (game_renderer) {
+            game_renderer->clearBackgroundTexture();
+        }
 
         active_config = AppConfig{};
 
@@ -248,6 +256,51 @@ int main() {
         session_id = static_cast<int64_t>(new_rng());
     };
 
+    auto createSoftInteractor = [&]() {
+        soft_interactor = std::make_unique<physics::SoftBodyInteractor>();
+        physics::SoftBodyInteractor::Config drag_cfg;
+        drag_cfg.pickRadiusPx = 28.0f;
+        drag_cfg.springStiffness = 2000.0f;
+        drag_cfg.springDamping = 100.0f;
+        drag_cfg.maxForce = (cpFloat)2e2;
+        soft_interactor->setConfig(drag_cfg);
+    };
+
+    auto persistActiveConfig = [&]() -> bool {
+        if (!active_save.has_value()) {
+            return false;
+        }
+
+        std::string error;
+        if (!SaveManager::saveSaveConfig(*active_save, active_config, error)) {
+            std::cerr << "Failed to save active config: " << error << "\n";
+            return false;
+        }
+
+        return true;
+    };
+
+    auto setRoomById = [&](const std::string& roomId, bool persist = true) -> bool {
+        if (!room_manager || !game_renderer) {
+            return false;
+        }
+
+        std::string error;
+        if (!room_manager->setCurrentRoom(roomId, error)) {
+            std::cerr << "Failed to set room '" << roomId << "': " << error << "\n";
+            return false;
+        }
+
+        game_renderer->setBackgroundTexture(room_manager->currentTexture());
+        active_config.current_room = roomId;
+
+        if (persist) {
+            persistActiveConfig();
+        }
+
+        return true;
+    };
+
     game_renderer = std::make_unique<render::GameRenderer>();
     std::string render_error;
     if (!game_renderer->initialize(render_error)) {
@@ -257,13 +310,13 @@ int main() {
         return 1;
     }
 
-    soft_interactor = std::make_unique<physics::SoftBodyInteractor>();
-    physics::SoftBodyInteractor::Config drag_cfg;
-    drag_cfg.pickRadiusPx = 28.0f;
-    drag_cfg.springStiffness = 2000.0f;
-    drag_cfg.springDamping = 100.0f;
-    drag_cfg.maxForce = (cpFloat)2e2;
-    soft_interactor->setConfig(drag_cfg);
+    room_manager = std::make_unique<rooms::RoomManager>();
+    std::string room_error;
+    if (!room_manager->initialize("assets/rooms", room_error)) {
+        std::cerr << "Failed to initialize RoomManager: " << room_error << "\n";
+    }
+
+    createSoftInteractor();
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -350,6 +403,7 @@ int main() {
             }
 
             game_renderer->beginFrame(display_w, display_h);
+            game_renderer->renderBackground();
             game_renderer->renderParts(psd_assembly.renderItems);
             game_renderer->endFrame();
         } else {
@@ -364,6 +418,7 @@ int main() {
 
             if (launcher.hasSelectedSave()) {
                 SaveEntry launched_save = launcher.selectedSave();
+                active_save = launched_save;
 
                 std::string opened_error;
                 if (!SaveManager::markSaveOpenedNow(launched_save, opened_error)) {
@@ -432,6 +487,8 @@ int main() {
                     std::cerr << "Memory initialization failed: " << memory_error << "\n";
                 }
 
+                createSoftInteractor();
+
                 physics_scene = std::make_unique<physics::PhysicsScene>();
                 int fbw = 0;
                 int fbh = 0;
@@ -448,6 +505,27 @@ int main() {
                     std::cerr << "Failed to assemble PSD character.\n";
                 }
 
+                if (room_manager) {
+                    const std::vector<std::string> ids = room_manager->roomIds();
+                    if (!ids.empty()) {
+                        if (!setRoomById(active_config.current_room, false)) {
+                            std::cerr << "Failed to set configured room '" << active_config.current_room
+                                    << "', falling back to 'lab'.\n";
+
+                            if (setRoomById("lab", false)) {
+                                active_config.current_room = "lab";
+                                persistActiveConfig();
+                            } else {
+                                std::cerr << "Failed to set fallback room 'lab'.\n";
+                                game_renderer->clearBackgroundTexture();
+                            }
+                        }
+                    } else {
+                        game_renderer->clearBackgroundTexture();
+                    }
+                }
+
+                last_frame_time = glfwGetTime();
                 pause_menu_open = false;
                 game_started = true;
             }
