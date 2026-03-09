@@ -1,4 +1,4 @@
-// SaveLauncherPanel.hpp
+// SaveLauncher.hpp
 #pragma once
 
 #include "AppConfig.hpp"
@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-class SaveLauncherPanel {
+class SaveLauncher {
 public:
-    SaveLauncherPanel(
+    SaveLauncher(
         std::string template_config_path,
         std::string saves_root
     );

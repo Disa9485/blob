@@ -2,11 +2,11 @@
 #include "AppConfig.hpp"
 #include "LlamaChatLoader.hpp"
 #include "ImGuiLayer.hpp"
-#include "ChatPanel.hpp"
+#include "ChatUI.hpp"
 #include "AudioEngine.hpp"
 #include "SpeechPipeline.hpp"
 #include "ConversationMemoryService.hpp"
-#include "SaveLauncherPanel.hpp"
+#include "SaveLauncher.hpp"
 #include "PhysicsScene.hpp"
 #include "GameRenderer.hpp"
 #include "PhysicsBodyFactory.hpp"
@@ -118,7 +118,7 @@ int main() {
         return 1;
     }
 
-    SaveLauncherPanel launcher(template_config_path, saves_root);
+    SaveLauncher launcher(template_config_path, saves_root);
     std::string launcher_error;
     if (!launcher.initialize(launcher_error)) {
         std::cerr << launcher_error << "\n";
@@ -128,7 +128,7 @@ int main() {
     std::unique_ptr<SpeechPipeline> speech;
     std::unique_ptr<LlamaChatLoader> loader;
     std::unique_ptr<ConversationMemoryService> memory_service;
-    std::unique_ptr<ChatPanel> panel;
+    std::unique_ptr<ChatUI> chat_ui;
     std::unique_ptr<physics::PhysicsScene> physics_scene;
     std::unique_ptr<render::GameRenderer> game_renderer;
     physics::PsdAssembly psd_assembly;
@@ -227,7 +227,7 @@ int main() {
 
         clearGameScene();
         current_scene_id.clear();
-        panel.reset();
+        chat_ui.reset();
         memory_service.reset();
         loader.reset();
         speech.reset();
@@ -240,7 +240,7 @@ int main() {
 
         active_config = AppConfig{};
 
-        launcher = SaveLauncherPanel(template_config_path, saves_root);
+        launcher = SaveLauncher(template_config_path, saves_root);
         std::string reset_error;
         if (!launcher.initialize(reset_error)) {
             std::cerr << reset_error << "\n";
@@ -530,8 +530,8 @@ int main() {
                 game_started = true;
             }
         } else {
-            if (!panel && loader && loader->isReady()) {
-                panel = std::make_unique<ChatPanel>(
+            if (!chat_ui && loader && loader->isReady()) {
+                chat_ui = std::make_unique<ChatUI>(
                     *loader->getChat(),
                     *speech,
                     active_config,
@@ -539,10 +539,12 @@ int main() {
                     soft_interactor.get(),
                     session_id
                 );
+
+                chat_ui->setSpeakerAnchorNormalized(ImVec2(0.5f, 0.5f));
             }
 
-            if (panel) {
-                panel->draw();
+            if (chat_ui) {
+                chat_ui->draw();
             } else if (loader) {
                 const float elapsed = loader->elapsedSeconds();
 
@@ -619,7 +621,7 @@ int main() {
         glfwSwapBuffers(window);
     }
 
-    panel.reset();
+    chat_ui.reset();
     memory_service.reset();
     loader.reset();
     speech.reset();

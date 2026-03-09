@@ -1,46 +1,14 @@
-// ChatPanel.cpp
-#include "ChatPanel.hpp"
+// ChatUI.cpp
+#include "ChatUI.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <ctime>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
 
 namespace {
-    ImVec2 clampWindowPosToViewport(
-        const ImVec2& pos,
-        const ImVec2& size,
-        const ImGuiViewport* viewport,
-        float outer_buffer)
-    {
-        if (!viewport) {
-            return pos;
-        }
-
-        const float min_x = viewport->WorkPos.x + outer_buffer;
-        const float min_y = viewport->WorkPos.y + outer_buffer;
-        const float max_x = viewport->WorkPos.x + viewport->WorkSize.x - outer_buffer - size.x;
-        const float max_y = viewport->WorkPos.y + viewport->WorkSize.y - outer_buffer - size.y;
-
-        ImVec2 clamped = pos;
-        clamped.x = (std::max)(min_x, (std::min)(clamped.x, max_x));
-        clamped.y = (std::max)(min_y, (std::min)(clamped.y, max_y));
-
-        return clamped;
-    }
-
-    ImVec2 computeInitialChatPanelSize(const ImGuiViewport* viewport, float outer_buffer) {
-        if (!viewport) {
-            return ImVec2(420.0f, 700.0f);
-        }
-
-        const float width = (std::max)(320.0f, viewport->WorkSize.x * 0.333f - outer_buffer);
-        const float height = (std::max)(360.0f, viewport->WorkSize.y - outer_buffer * 2.0f);
-        return ImVec2(width, height);
-    }
-
     const char* ordinalSuffix(int day) {
         if (day % 100 >= 11 && day % 100 <= 13) {
             return "th";
@@ -204,35 +172,23 @@ namespace {
             out << dynamic_base_prompt;
         }
 
-        out << "\n\nCurrent datetime: "
-            << current_display_time;
+        out << "\n\nCurrent datetime: " << current_display_time;
 
         if (!retrieved_memories.empty()) {
-            out << "\n\nYour potential relevant memories:\n"
-                << retrieved_memories;
+            out << "\n\nYour potential relevant memories:\n" << retrieved_memories;
         }
 
         if (!touch_summary.empty()) {
-            out << "\n\n"
-                << touch_summary;
+            out << "\n\n" << touch_summary;
         }
+
+        out << " You should mention this to them.";
 
         return out.str();
     }
-
-    bool isUsableViewport(const ImGuiViewport* viewport, float outer_buffer) {
-        if (!viewport) {
-            return false;
-        }
-
-        const float usable_width = viewport->WorkSize.x - outer_buffer * 2.0f;
-        const float usable_height = viewport->WorkSize.y - outer_buffer * 2.0f;
-
-        return usable_width > 64.0f && usable_height > 64.0f;
-    }
 }
 
-ChatPanel::ChatPanel(
+ChatUI::ChatUI(
     LlamaChat& chat,
     SpeechPipeline& speech,
     AppConfig& config,
@@ -244,18 +200,43 @@ ChatPanel::ChatPanel(
     , config_(config)
     , memory_(memory)
     , soft_body_interactor_(soft_body_interactor)
-    , session_id_(session_id) {
+    , session_id_(session_id)
+{
     messages_.push_back({ "system", "", "", "Communications Established." });
 }
 
-ChatPanel::~ChatPanel() {
+ChatUI::~ChatUI() {
     if (worker_.joinable()) {
         worker_.join();
     }
 }
 
-void ChatPanel::startGeneration(const std::string& user_text) {
-    if (generating_) return;
+void ChatUI::setSpeakerAnchorNormalized(const ImVec2& normalizedAnchor) {
+    speaker_anchor_normalized_.x = (std::max)(0.0f, (std::min)(1.0f, normalizedAnchor.x));
+    speaker_anchor_normalized_.y = (std::max)(0.0f, (std::min)(1.0f, normalizedAnchor.y));
+}
+
+void ChatUI::setBubblePlacement(float offsetX, float offsetY) {
+    bubble_stack_offset_x_ = offsetX;
+    bubble_stack_offset_y_ = offsetY;
+}
+
+void ChatUI::setTailShape(
+    float attachX,
+    float attachY,
+    float width,
+    float height
+) {
+    tail_attach_x_ = attachX;
+    tail_attach_y_ = attachY;
+    tail_width_ = width;
+    tail_height_ = height;
+}
+
+void ChatUI::startGeneration(const std::string& user_text) {
+    if (generating_) {
+        return;
+    }
 
     if (worker_.joinable()) {
         worker_.join();
@@ -304,9 +285,10 @@ void ChatPanel::startGeneration(const std::string& user_text) {
         last_retrieved_memory_ = retrieved_memory_text;
         last_augmented_system_prompt_ = augmented_system_prompt;
 
+        visible_bubbles_.clear();
         messages_.push_back({ "user", user_display_ts, user_iso_ts, user_text });
         messages_.push_back({ "assistant", assistant_display_ts, assistant_iso_ts, "" });
-        scroll_to_bottom_ = true;
+        scroll_history_to_bottom_ = true;
     }
 
     if (memory_ && memory_->isEnabled()) {
@@ -356,7 +338,8 @@ void ChatPanel::startGeneration(const std::string& user_text) {
                         messages_.back().text += "\n";
                     }
                     messages_.back().text += "[generation failed]";
-                    scroll_to_bottom_ = true;
+                    visible_bubbles_.push_back({ "[generation failed]" });
+                    scroll_history_to_bottom_ = true;
                 }
             }
 
@@ -382,7 +365,7 @@ void ChatPanel::startGeneration(const std::string& user_text) {
     });
 }
 
-void ChatPanel::appendAssistantSentence(const std::string& sentence) {
+void ChatUI::appendAssistantSentence(const std::string& sentence) {
     if (sentence.empty()) {
         return;
     }
@@ -390,150 +373,115 @@ void ChatPanel::appendAssistantSentence(const std::string& sentence) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!messages_.empty() && messages_.back().role == "assistant") {
-            messages_.back().text = messages_.back().text + " " + sentence;
-            scroll_to_bottom_ = true;
+            if (!messages_.back().text.empty()) {
+                messages_.back().text += " ";
+            }
+            messages_.back().text += sentence;
+            visible_bubbles_.push_back({ sentence });
+            scroll_history_to_bottom_ = true;
         }
     }
 
     speech_.pushSentence(sentence);
 }
 
-void ChatPanel::draw() {
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float outer_buffer = 16.0f;
-    const bool viewport_usable = isUsableViewport(viewport, outer_buffer);
+std::string ChatUI::loadingDotsText() const {
+    const int dots = static_cast<int>(ImGui::GetTime() * 2.0f) % 4;
+    switch (dots) {
+        case 0: return "";
+        case 1: return ".";
+        case 2: return "..";
+        default: return "...";
+    }
+}
 
-    if (viewport_usable) {
-        ImGui::SetNextWindowSizeConstraints(
-            ImVec2(320.0f, 360.0f),
-            ImVec2(
-                (std::max)(320.0f, viewport->WorkSize.x - outer_buffer * 2.0f),
-                (std::max)(360.0f, viewport->WorkSize.y - outer_buffer * 2.0f)
-            )
-        );
+void ChatUI::drawTopClock() {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) {
+        return;
     }
 
-    if (!initial_window_layout_set_ && viewport_usable) {
-        const ImVec2 initial_size = computeInitialChatPanelSize(viewport, outer_buffer);
-        const ImVec2 initial_pos(
-            viewport->WorkPos.x + outer_buffer,
-            viewport->WorkPos.y + outer_buffer
-        );
+    const std::string now_text = formatTimestampNow();
+    const ImVec2 text_size = ImGui::CalcTextSize(now_text.c_str());
 
-        ImGui::SetNextWindowPos(initial_pos, ImGuiCond_Always);
-        ImGui::SetNextWindowSize(initial_size, ImGuiCond_Always);
+    const float pad_x = 12.0f;
+    const float pad_y = 6.0f;
+    const float window_w = text_size.x + pad_x * 2.0f;
+    const float window_h = text_size.y + pad_y * 2.0f;
 
-        last_window_pos_ = initial_pos;
-        last_window_size_ = initial_size;
-        have_last_window_rect_ = true;
-        initial_window_layout_set_ = true;
-    } else if (viewport_usable && have_last_window_rect_) {
-        const ImVec2 clamped_pos = clampWindowPosToViewport(
-            last_window_pos_,
-            last_window_size_,
-            viewport,
-            outer_buffer
-        );
-
-        const bool needs_clamp =
-            clamped_pos.x != last_window_pos_.x ||
-            clamped_pos.y != last_window_pos_.y;
-
-        if (needs_clamp) {
-            ImGui::SetNextWindowPos(clamped_pos, ImGuiCond_Always);
-            last_window_pos_ = clamped_pos;
-        }
-    }
-
-    const std::string chat_header = "Chatting with " + config_.llmName();
-    ImGui::Begin(chat_header.c_str());
-
-    if (viewport_usable) {
-        const ImVec2 current_pos = ImGui::GetWindowPos();
-        const ImVec2 current_size = ImGui::GetWindowSize();
-
-        if (current_size.x > 64.0f && current_size.y > 64.0f) {
-            last_window_pos_ = current_pos;
-            last_window_size_ = current_size;
-            have_last_window_rect_ = true;
-        }
-    }
-
-    if (config_.llm_options.show_system_prompt) {
-        std::string static_prompt;
-        std::string dynamic_prompt;
-        std::string retrieved;
-
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            static_prompt = config_.buildStaticSystemPrompt();
-            dynamic_prompt = last_augmented_system_prompt_.empty()
-                ? config_.buildDynamicSystemPrompt()
-                : last_augmented_system_prompt_;
-            retrieved = last_retrieved_memory_;
-        }
-
-        ImGui::Text("System Prompt");
-        ImGui::BeginChild("SystemPromptRegion", ImVec2(0.0f, 90.0f), true);
-        ImGui::TextWrapped("%s", static_prompt.c_str());
-        ImGui::TextWrapped("%s", dynamic_prompt.c_str());
-        ImGui::EndChild();
-
-        ImGui::Separator();
-    }
-
-    const std::string current_display_time = formatTimestampNow();
-    ImGui::Text("Current Datetime: %s", current_display_time.c_str());
-    ImGui::Separator();
-
-    float t = ImGui::GetTime();
-    int dots = static_cast<int>(t * 2.0f) % 4;
-    const char* anim[] = { "", ".", "..", "..." };
-
-    if (generating_)
-        ImGui::Text("Status: Generating%s", anim[dots]);
-    else
-        ImGui::Text("Status: Idle");
-
-    const float footer_height =
-        ImGui::GetFrameHeight() +
-        ImGui::GetStyle().ItemSpacing.y;
-
-    ImGui::BeginChild(
-        "ChatScrollRegion",
-        ImVec2(0.0f, -footer_height),
-        true
+    ImGui::SetNextWindowBgAlpha(0.0f);
+    ImGui::SetNextWindowPos(
+        ImVec2(
+            viewport->WorkPos.x + viewport->WorkSize.x * 0.5f - window_w * 0.5f,
+            viewport->WorkPos.y + 12.0f
+        ),
+        ImGuiCond_Always
+    );
+    ImGui::SetNextWindowSize(
+        ImVec2(window_w, window_h),
+        ImGuiCond_Always
     );
 
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad_x, pad_y));
 
-        for (const Entry& msg : messages_) {
-            if (msg.role == "user") {
-                ImGui::TextWrapped("%s: %s", config_.userName().c_str(), msg.text.c_str());
-            } else if (msg.role == "assistant") {
-                const std::string current_name = config_.llmName();
-                ImGui::TextWrapped("%s: %s", current_name.c_str(), msg.text.c_str());
-            } else {
-                ImGui::TextWrapped("%s", msg.text.c_str());
-            }
+    ImGui::Begin(
+        "##TopClock",
+        nullptr,
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoBackground
+    );
 
-            ImGui::Spacing();
-        }
+    ImGui::TextUnformatted(now_text.c_str());
+    ImGui::End();
 
-        if (scroll_to_bottom_) {
-            ImGui::SetScrollHereY(1.0f);
-            scroll_to_bottom_ = false;
-        }
+    ImGui::PopStyleVar();
+}
+
+void ChatUI::drawInputBar() {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) {
+        return;
     }
 
-    ImGui::EndChild();
+    const float input_width = (std::min)(500.0f, viewport->WorkSize.x - 140.0f);
+    const float button_width = 80.0f;
+    const float gap = 8.0f;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
+
+    const float control_height = ImGui::GetFrameHeight();
+    const float total_width = input_width + gap + button_width;
+    const float total_height = control_height;
+
+    const ImVec2 pos(
+        viewport->WorkPos.x + viewport->WorkSize.x * 0.5f - total_width * 0.5f,
+        viewport->WorkPos.y + viewport->WorkSize.y - total_height - 16.0f
+    );
+
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(total_width, total_height), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.0f);
+
+    ImGui::Begin(
+        "##ChatInputBar",
+        nullptr,
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBackground
+    );
 
     static char buffer[2048] = {};
     std::memset(buffer, 0, sizeof(buffer));
     std::memcpy(buffer, input_.c_str(), (std::min)(input_.size(), sizeof(buffer) - 1));
 
-    ImGui::PushItemWidth(-110.0f);
+    ImGui::PushItemWidth(input_width);
     const bool enter_pressed = ImGui::InputText(
         "##chat_input",
         buffer,
@@ -544,8 +492,8 @@ void ChatPanel::draw() {
 
     input_ = buffer;
 
-    ImGui::SameLine();
-    const bool send_clicked = ImGui::Button("Send");
+    ImGui::SameLine(0.0f, gap);
+    const bool send_clicked = ImGui::Button("Send", ImVec2(button_width, control_height));
 
     if (!generating_ && (send_clicked || enter_pressed) && !input_.empty()) {
         const std::string user_text = input_;
@@ -554,4 +502,186 @@ void ChatPanel::draw() {
     }
 
     ImGui::End();
+    ImGui::PopStyleVar(4);
+}
+
+void ChatUI::drawHistoryPanel() {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) {
+        return;
+    }
+
+    const float edge_buffer = 16.0f;
+
+    const ImVec2 panel_pos(
+        viewport->WorkPos.x + edge_buffer,
+        viewport->WorkPos.y + edge_buffer
+    );
+
+    const ImVec2 panel_size(
+        (std::max)(280.0f, viewport->WorkSize.x * 0.15f),
+        (std::max)(240.0f, viewport->WorkSize.y - edge_buffer * 2.0f)
+    );
+
+    ImGui::SetNextWindowPos(panel_pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(panel_size, ImGuiCond_Always);
+    ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
+
+    ImGui::Begin(
+        "Chat History",
+        nullptr,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings
+    );
+
+    if (config_.llm_options.show_system_prompt) {
+        std::string static_prompt;
+        std::string dynamic_prompt;
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            static_prompt = config_.buildStaticSystemPrompt();
+            dynamic_prompt = last_augmented_system_prompt_.empty()
+                ? config_.buildDynamicSystemPrompt()
+                : last_augmented_system_prompt_;
+        }
+
+        ImGui::Text("System Prompt");
+        ImGui::BeginChild("SystemPromptRegion", ImVec2(0.0f, 110.0f), true);
+        ImGui::TextWrapped("%s", static_prompt.c_str());
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", dynamic_prompt.c_str());
+        ImGui::EndChild();
+
+        ImGui::Separator();
+    }
+
+    ImGui::BeginChild("HistoryScrollRegion", ImVec2(0.0f, 0.0f), true);
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        for (const Entry& msg : messages_) {
+            if (msg.role == "user") {
+                ImGui::TextWrapped("%s: %s", config_.userName().c_str(), msg.text.c_str());
+            } else if (msg.role == "assistant") {
+                ImGui::TextWrapped("%s: %s", config_.llmName().c_str(), msg.text.c_str());
+            } else {
+                ImGui::TextWrapped("%s", msg.text.c_str());
+            }
+
+            ImGui::Spacing();
+        }
+
+        if (scroll_history_to_bottom_) {
+            ImGui::SetScrollHereY(1.0f);
+            scroll_history_to_bottom_ = false;
+        }
+    }
+
+    ImGui::EndChild();
+    ImGui::End();
+}
+
+void ChatUI::drawDialogueBubbles() {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    if (!viewport) {
+        return;
+    }
+
+    std::vector<DialogueBubble> bubbles_copy;
+    bool generating_now = generating_.load();
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        bubbles_copy = visible_bubbles_;
+    }
+
+    if (generating_now) {
+        bubbles_copy.push_back({ loadingDotsText() });
+    }
+
+    if (bubbles_copy.empty()) {
+        return;
+    }
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+
+    const ImVec2 anchor(
+        viewport->WorkPos.x + viewport->WorkSize.x * speaker_anchor_normalized_.x,
+        viewport->WorkPos.y + viewport->WorkSize.y * speaker_anchor_normalized_.y
+    );
+
+    const float bubble_max_width = (std::min)(420.0f, viewport->WorkSize.x * 0.33f);
+    const float pad_x = 16.0f;
+    const float pad_y = 12.0f;
+    const float spacing_y = 10.0f;
+    const float rounding = 18.0f;
+    const float wrap_width = bubble_max_width - pad_x * 2.0f;
+
+    float current_y = anchor.y + bubble_stack_offset_y_;
+    const float start_x = anchor.x + bubble_stack_offset_x_;
+
+    for (std::size_t i = 0; i < bubbles_copy.size(); ++i) {
+        const bool draw_tail = (i == 0);
+
+        const ImVec2 text_size = ImGui::CalcTextSize(
+            bubbles_copy[i].text.c_str(),
+            nullptr,
+            false,
+            wrap_width
+        );
+
+        const float bubble_w = text_size.x + pad_x * 2.0f;
+        const float bubble_h = text_size.y + pad_y * 2.0f;
+
+        const ImVec2 rect_min(start_x, current_y);
+        const ImVec2 rect_max(start_x + bubble_w, current_y + bubble_h);
+
+        const ImU32 fill_col = IM_COL32(248, 248, 252, 255);
+        const ImU32 text_col = IM_COL32(20, 20, 24, 255);
+
+        draw->AddRectFilled(rect_min, rect_max, fill_col, rounding);
+
+        if (draw_tail) {
+            const ImVec2 tail_a(
+                rect_min.x + tail_attach_x_,
+                rect_min.y + tail_attach_y_
+            );
+
+            const ImVec2 tail_b(
+                rect_min.x + tail_attach_x_,
+                rect_min.y + tail_attach_y_ + tail_height_
+            );
+
+            const ImVec2 tail_c(
+                rect_min.x + tail_attach_x_ - tail_width_,
+                rect_min.y + tail_attach_y_
+            );
+
+            draw->AddTriangleFilled(tail_a, tail_b, tail_c, fill_col);
+        }
+
+        const ImVec2 text_pos(rect_min.x + pad_x, rect_min.y + pad_y);
+
+        draw->AddText(
+            nullptr,
+            0.0f,
+            text_pos,
+            text_col,
+            bubbles_copy[i].text.c_str(),
+            nullptr,
+            wrap_width
+        );
+
+        current_y += bubble_h + spacing_y;
+    }
+}
+
+void ChatUI::draw() {
+    drawTopClock();
+    drawDialogueBubbles();
+    drawInputBar();
+    drawHistoryPanel();
 }

@@ -66,14 +66,14 @@ add_executable(blob
     main.cpp
     AppConfig.cpp
     SaveManager.cpp
-    SaveLauncherPanel.cpp
+    SaveLauncher.cpp
     LlamaChat.cpp
     LlamaChatLoader.cpp
     EmbeddingModel.cpp
     ConversationMemoryStore.cpp
     ConversationMemoryService.cpp
     ImGuiLayer.cpp
-    ChatPanel.cpp
+    ChatUI.cpp
     AudioEngine.cpp
     SentenceDetector.cpp
     FaissMemoryIndex.cpp

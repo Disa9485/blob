@@ -1,5 +1,5 @@
-// SaveLauncherPanel.cpp
-#include "SaveLauncherPanel.hpp"
+// SaveLauncher.cpp
+#include "SaveLauncher.hpp"
 
 #include "imgui.h"
 
@@ -168,7 +168,7 @@ namespace {
     }
 }
 
-SaveLauncherPanel::SaveLauncherPanel(
+SaveLauncher::SaveLauncher(
     std::string template_config_path,
     std::string saves_root)
     : template_config_path_(std::move(template_config_path))
@@ -178,7 +178,7 @@ SaveLauncherPanel::SaveLauncherPanel(
     std::memset(create_user_name_, 0, sizeof(create_user_name_));
 }
 
-bool SaveLauncherPanel::initialize(std::string& out_error) {
+bool SaveLauncher::initialize(std::string& out_error) {
     if (!SaveManager::ensureSavesDirectory(out_error)) {
         return false;
     }
@@ -187,19 +187,19 @@ bool SaveLauncherPanel::initialize(std::string& out_error) {
     return true;
 }
 
-bool SaveLauncherPanel::hasSelectedSave() const {
+bool SaveLauncher::hasSelectedSave() const {
     return selected_ready_;
 }
 
-const SaveEntry& SaveLauncherPanel::selectedSave() const {
+const SaveEntry& SaveLauncher::selectedSave() const {
     return selected_save_;
 }
 
-const AppConfig& SaveLauncherPanel::selectedConfig() const {
+const AppConfig& SaveLauncher::selectedConfig() const {
     return selected_config_;
 }
 
-void SaveLauncherPanel::refreshSaveList() {
+void SaveLauncher::refreshSaveList() {
     std::string error;
     if (!SaveManager::listSaves(saves_root_, saves_, error)) {
         last_error_ = error;
@@ -216,7 +216,7 @@ void SaveLauncherPanel::refreshSaveList() {
     }
 }
 
-void SaveLauncherPanel::drawDeleteSavePopup() {
+void SaveLauncher::drawDeleteSavePopup() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     if (viewport) {
         ImGui::SetNextWindowPos(
@@ -274,7 +274,7 @@ void SaveLauncherPanel::drawDeleteSavePopup() {
     ImGui::PopStyleVar(2);
 }
 
-bool SaveLauncherPanel::beginSettingsEdit(int index) {
+bool SaveLauncher::beginSettingsEdit(int index) {
     if (index < 0 || index >= static_cast<int>(saves_.size())) {
         last_error_ = "Invalid save selection.";
         return false;
@@ -295,14 +295,14 @@ bool SaveLauncherPanel::beginSettingsEdit(int index) {
     return true;
 }
 
-void SaveLauncherPanel::closeSettingsEditor() {
+void SaveLauncher::closeSettingsEditor() {
     in_settings_ = false;
     settings_index_ = -1;
     settings_loaded_ = false;
     settings_config_ = AppConfig{};
 }
 
-bool SaveLauncherPanel::drawPowerOfTwoCtxSelector(
+bool SaveLauncher::drawPowerOfTwoCtxSelector(
     const char* label,
     int& value,
     int min_power,
@@ -338,7 +338,7 @@ bool SaveLauncherPanel::drawPowerOfTwoCtxSelector(
     return changed;
 }
 
-bool SaveLauncherPanel::drawResolutionCombo(
+bool SaveLauncher::drawResolutionCombo(
     const char* label,
     int& width,
     int& height,
@@ -379,7 +379,7 @@ bool SaveLauncherPanel::drawResolutionCombo(
     return changed;
 }
 
-void SaveLauncherPanel::draw() {
+void SaveLauncher::draw() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(viewport->WorkSize, ImGuiCond_Always);
@@ -411,7 +411,7 @@ void SaveLauncherPanel::draw() {
     ImGui::PopStyleVar(2);
 }
 
-void SaveLauncherPanel::drawSaveList() {
+void SaveLauncher::drawSaveList() {
     ImGui::Text("Saves");
     ImGui::Separator();
 
@@ -484,7 +484,7 @@ void SaveLauncherPanel::drawSaveList() {
     }
 }
 
-void SaveLauncherPanel::drawSettingsEditor() {
+void SaveLauncher::drawSettingsEditor() {
     if (!settings_loaded_ ||
         settings_index_ < 0 ||
         settings_index_ >= static_cast<int>(saves_.size())) {
@@ -716,7 +716,7 @@ void SaveLauncherPanel::drawSettingsEditor() {
     }
 }
 
-void SaveLauncherPanel::drawCreateSavePopup() {
+void SaveLauncher::drawCreateSavePopup() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     if (viewport) {
         ImGui::SetNextWindowPos(
