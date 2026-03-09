@@ -122,12 +122,26 @@ void SoftBodyInteractor::recordTouchedPart(const std::string& partId) {
     }
 }
 
+bool SoftBodyInteractor::touchedSomethingRecently() const {
+    return hasPendingTouchedParts();
+}
+
 void SoftBodyInteractor::clearTouchedParts() {
     touchedPartsHumanReadable_.clear();
     touchedPartsSeen_.clear();
 }
 
 std::string SoftBodyInteractor::consumeTouchedPartsSentence(const std::string& userName) {
+    const std::string result = peekTouchedPartsSentence(userName);
+    clearTouchedParts();
+    return result;
+}
+
+bool SoftBodyInteractor::hasPendingTouchedParts() const {
+    return !touchedPartsHumanReadable_.empty();
+}
+
+std::string SoftBodyInteractor::peekTouchedPartsSentence(const std::string& userName) const {
     if (touchedPartsHumanReadable_.empty()) {
         return "";
     }
@@ -152,9 +166,7 @@ std::string SoftBodyInteractor::consumeTouchedPartsSentence(const std::string& u
         }
     }
 
-    const std::string result = out.str();
-    clearTouchedParts();
-    return result;
+    return out.str();
 }
 
 void SoftBodyInteractor::beginDrag(
@@ -182,6 +194,7 @@ void SoftBodyInteractor::beginDrag(
 
     if (!grabbedPart_->name.empty()) {
         recordTouchedPart(grabbedPart_->name);
+        ++touchEventSerial_;
     }
 
     cpBodySetPosition(mouseBody, mouseWorld);

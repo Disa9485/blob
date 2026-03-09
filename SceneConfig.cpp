@@ -102,6 +102,31 @@ bool SceneConfig::loadFromFile(
                     return false;
                 }
             }
+
+            if (scene.contains("dialogue_anchor")) {
+                const json& da = scene.at("dialogue_anchor");
+                if (!da.is_object()) {
+                    error = "scene.dialogue_anchor must be an object.";
+                    return false;
+                }
+
+                out.dialogueAnchor.enabled = true;
+                out.dialogueAnchor.part = da.value("part", std::string{});
+
+                if (out.dialogueAnchor.part.empty()) {
+                    error = "scene.dialogue_anchor.part must be a non-empty string.";
+                    return false;
+                }
+
+                if (!da.contains("attach")) {
+                    error = "scene.dialogue_anchor is missing attach.";
+                    return false;
+                }
+
+                if (!readVec2(da.at("attach"), out.dialogueAnchor.attach, "scene.dialogue_anchor.attach", error)) {
+                    return false;
+                }
+            }
         }
 
         if (root.contains("soft_overrides")) {

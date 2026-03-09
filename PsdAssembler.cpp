@@ -40,6 +40,106 @@ static cpVect canvasToWorldCp(Vec2 canvasPt, Vec2 canvasCenter, Vec2 worldPos, f
     return cpv((cpFloat)w.x, (cpFloat)w.y);
 }
 
+static bool initializeDialogueAnchorRuntime(
+    const SceneDialogueAnchorConfig& cfg,
+    const std::unordered_map<std::string, RenderPart*>& partsByName,
+    Vec2 canvasCenter,
+    Vec2 sceneWorldPos,
+    float sceneScale,
+    DialogueAnchorRuntime& out
+) {
+    out = DialogueAnchorRuntime{};
+
+    if (!cfg.enabled) {
+        return true;
+    }
+
+    auto it = partsByName.find(cfg.part);
+    if (it == partsByName.end() || !it->second) {
+        std::cerr << "[dialogue_anchor] unknown part: " << cfg.part << "\n";
+        return false;
+    }
+
+    RenderPart* part = it->second;
+    const cpVect anchorWorld = canvasToWorldCp(cfg.attach, canvasCenter, sceneWorldPos, sceneScale);
+
+    out.valid = true;
+    out.partName = cfg.part;
+    out.part = part;
+    out.attachCanvas = cfg.attach;
+
+    if (part->kind == PartKind::Rigid) {
+        if (!part->rigid.body) {
+            std::cerr << "[dialogue_anchor] rigid part has no body: " << cfg.part << "\n";
+            out.valid = false;
+            return false;
+        }
+
+        out.rigidLocal = cpBodyWorldToLocal(part->rigid.body, anchorWorld);
+        return true;
+    }
+
+    cpBody* bestBody = nullptr;
+    int bestIndex = -1;
+    cpFloat bestDist2 = (cpFloat)1e18;
+
+    for (int i = 0; i < static_cast<int>(part->soft.body.bodies.size()); ++i) {
+        cpBody* b = part->soft.body.bodies[i];
+        if (!b) {
+            continue;
+        }
+
+        const cpVect p = cpBodyGetPosition(b);
+        const cpFloat d2 = cpvlengthsq(cpvsub(p, anchorWorld));
+        if (d2 < bestDist2) {
+            bestDist2 = d2;
+            bestBody = b;
+            bestIndex = i;
+        }
+    }
+
+    if (!bestBody || bestIndex < 0) {
+        std::cerr << "[dialogue_anchor] soft part has no vertex bodies: " << cfg.part << "\n";
+        out.valid = false;
+        return false;
+    }
+
+    out.softVertexIndex = bestIndex;
+    out.softVertexLocalOffset = cpBodyWorldToLocal(bestBody, anchorWorld);
+    return true;
+}
+
+static bool getDialogueAnchorWorldPosition(
+    const DialogueAnchorRuntime& anchor,
+    cpVect& outWorld
+) {
+    if (!anchor.valid || !anchor.part) {
+        return false;
+    }
+
+    if (anchor.part->kind == PartKind::Rigid) {
+        if (!anchor.part->rigid.body) {
+            return false;
+        }
+
+        outWorld = cpBodyLocalToWorld(anchor.part->rigid.body, anchor.rigidLocal);
+        return true;
+    }
+
+    if (anchor.softVertexIndex < 0 ||
+        anchor.softVertexIndex >= static_cast<int>(anchor.part->soft.body.bodies.size())) {
+        return false;
+    }
+
+    cpBody* b = anchor.part->soft.body.bodies[anchor.softVertexIndex];
+    if (!b) {
+        return false;
+    }
+
+    outWorld = cpBodyLocalToWorld(b, anchor.softVertexLocalOffset);
+    return true;
+}
+
 static ImageRGBA makeImageFromLayer(const LayerImageRGBA& layer) {
     ImageRGBA img;
     img.width = layer.width;
@@ -353,6 +453,31 @@ bool PsdAssembler::resolveSceneFiles(
     return true;
 }
 
+bool PsdAssembler::getDialogueAnchorNormalized(
+    const PsdAssembly& assembly,
+    int sceneWidth,
+    int sceneHeight,
+    Vec2& outNormalized
+) {
+    outNormalized = Vec2{ 0.5f, 0.5f };
+
+    if (sceneWidth <= 0 || sceneHeight <= 0) {
+        return false;
+    }
+
+    cpVect world;
+    if (!getDialogueAnchorWorldPosition(assembly.dialogueAnchor, world)) {
+        return false;
+    }
+
+    outNormalized.x = static_cast<float>(world.x) / static_cast<float>(sceneWidth);
+    outNormalized.y = static_cast<float>(world.y) / static_cast<float>(sceneHeight);
+
+    outNormalized.x = std::clamp(outNormalized.x, 0.0f, 1.0f);
+    outNormalized.y = std::clamp(outNormalized.y, 0.0f, 1.0f);
+    return true;
+}
+
 bool PsdAssembler::buildScene(
     cpSpace* space,
     render::GameRenderer& renderer,
@@ -537,6 +662,18 @@ bool PsdAssembler::buildScene(
     out.partsByName.reserve(out.parts.size());
     for (RenderPart& p : out.parts) {
         out.partsByName[p.name] = &p;
+    }
+
+    if (config.dialogueAnchor.enabled) {
+        if (!initializeDialogueAnchorRuntime(
+                config.dialogueAnchor,
+                out.partsByName,
+                canvasCenter,
+                sceneWorldPos,
+                sceneScale,
+                out.dialogueAnchor)) {
+            std::cerr << "[dialogue_anchor] failed to initialize for scene: " << sceneId << "\n";
+        }
     }
 
     for (auto& pr : overlaysByBase) {

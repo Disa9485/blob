@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 #include <nlohmann/json.hpp>
 
@@ -87,7 +88,22 @@ namespace {
                 { "height", config.window.height },
                 { "glsl_version", config.window.glsl_version },
                 { "vsync", config.window.vsync },
-                { "fullscreen", config.window.fullscreen }
+                { "fullscreen", config.window.fullscreen },
+                { "anti_aliasing_samples", config.window.anti_aliasing_samples }
+            }},
+            { "lighting", {
+                { "enabled", config.lighting.enabled },
+                { "ambient_intensity", config.lighting.ambient_intensity },
+                { "ambient_warmth", config.lighting.ambient_warmth },
+                { "light_x", config.lighting.light_x },
+                { "light_y", config.lighting.light_y },
+                { "light_intensity", config.lighting.light_intensity },
+                { "light_radius", config.lighting.light_radius },
+                { "light_softness", config.lighting.light_softness },
+                { "light_r", config.lighting.light_r },
+                { "light_g", config.lighting.light_g },
+                { "light_b", config.lighting.light_b },
+                { "vignette_strength", config.lighting.vignette_strength }
             }},
             { "llm", {
                 { "static_system_prompt", config.static_system_prompt },
@@ -101,7 +117,10 @@ namespace {
                 { "greedy", config.llm_options.greedy },
                 { "top_k", config.llm_options.top_k },
                 { "top_p", config.llm_options.top_p },
-                { "temperature", config.llm_options.temperature }
+                { "temperature", config.llm_options.temperature },
+                { "talk_on_boot_chance", config.autonomous_speech.talk_on_boot_chance },
+                { "talk_on_touch_chance", config.autonomous_speech.talk_on_touch_chance },
+                { "talk_per_minute_chance", config.autonomous_speech.talk_per_minute_chance }
             }},
             { "memory", {
                 { "enabled", config.memory.enabled },
@@ -173,6 +192,23 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
             readIfPresent(w, "glsl_version", out_config.window.glsl_version);
             readIfPresent(w, "vsync", out_config.window.vsync);
             readIfPresent(w, "fullscreen", out_config.window.fullscreen);
+            readIfPresent(w, "anti_aliasing_samples", out_config.window.anti_aliasing_samples);
+        }
+
+        if (auto it = j.find("lighting"); it != j.end() && it->is_object()) {
+            const json& l = *it;
+            readIfPresent(l, "enabled", out_config.lighting.enabled);
+            readIfPresent(l, "ambient_intensity", out_config.lighting.ambient_intensity);
+            readIfPresent(l, "ambient_warmth", out_config.lighting.ambient_warmth);
+            readIfPresent(l, "light_x", out_config.lighting.light_x);
+            readIfPresent(l, "light_y", out_config.lighting.light_y);
+            readIfPresent(l, "light_intensity", out_config.lighting.light_intensity);
+            readIfPresent(l, "light_radius", out_config.lighting.light_radius);
+            readIfPresent(l, "light_softness", out_config.lighting.light_softness);
+            readIfPresent(l, "light_r", out_config.lighting.light_r);
+            readIfPresent(l, "light_g", out_config.lighting.light_g);
+            readIfPresent(l, "light_b", out_config.lighting.light_b);
+            readIfPresent(l, "vignette_strength", out_config.lighting.vignette_strength);
         }
 
         if (auto it = j.find("llm"); it != j.end() && it->is_object()) {
@@ -195,6 +231,9 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
             readIfPresent(l, "top_k", out_config.llm_options.top_k);
             readIfPresent(l, "top_p", out_config.llm_options.top_p);
             readIfPresent(l, "temperature", out_config.llm_options.temperature);
+            readIfPresent(l, "talk_on_boot_chance", out_config.autonomous_speech.talk_on_boot_chance);
+            readIfPresent(l, "talk_on_touch_chance", out_config.autonomous_speech.talk_on_touch_chance);
+            readIfPresent(l, "talk_per_minute_chance", out_config.autonomous_speech.talk_per_minute_chance);
         }
 
         if (auto it = j.find("memory"); it != j.end() && it->is_object()) {
@@ -256,6 +295,27 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
         return false;
     }
 
+    out_config.window.anti_aliasing_samples =
+        (out_config.window.anti_aliasing_samples == 0 ||
+        out_config.window.anti_aliasing_samples == 2 ||
+        out_config.window.anti_aliasing_samples == 4 ||
+        out_config.window.anti_aliasing_samples == 8 ||
+        out_config.window.anti_aliasing_samples == 16)
+            ? out_config.window.anti_aliasing_samples
+            : 4;
+
+    out_config.lighting.ambient_intensity = std::clamp(out_config.lighting.ambient_intensity, 0.0f, 2.0f);
+    out_config.lighting.ambient_warmth = std::clamp(out_config.lighting.ambient_warmth, 0.0f, 1.0f);
+    out_config.lighting.light_x = std::clamp(out_config.lighting.light_x, 0.0f, 1.0f);
+    out_config.lighting.light_y = std::clamp(out_config.lighting.light_y, 0.0f, 1.0f);
+    out_config.lighting.light_intensity = std::clamp(out_config.lighting.light_intensity, 0.0f, 3.0f);
+    out_config.lighting.light_radius = std::clamp(out_config.lighting.light_radius, 0.05f, 2.0f);
+    out_config.lighting.light_softness = std::clamp(out_config.lighting.light_softness, 0.1f, 4.0f);
+    out_config.lighting.light_r = std::clamp(out_config.lighting.light_r, 0.0f, 2.0f);
+    out_config.lighting.light_g = std::clamp(out_config.lighting.light_g, 0.0f, 2.0f);
+    out_config.lighting.light_b = std::clamp(out_config.lighting.light_b, 0.0f, 2.0f);
+    out_config.lighting.vignette_strength = std::clamp(out_config.lighting.vignette_strength, 0.0f, 1.0f);
+
     if (out_config.window.width <= 0 || out_config.window.height <= 0) {
         out_error = "Window width and height must be positive.";
         return false;
@@ -277,6 +337,13 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
         out_error = "n_ctx, n_predict, and n_threads must be positive.";
         return false;
     }
+
+    out_config.autonomous_speech.talk_on_boot_chance =
+        std::clamp(out_config.autonomous_speech.talk_on_boot_chance, 0.0f, 1.0f);
+    out_config.autonomous_speech.talk_on_touch_chance =
+        std::clamp(out_config.autonomous_speech.talk_on_touch_chance, 0.0f, 1.0f);
+    out_config.autonomous_speech.talk_per_minute_chance =
+        std::clamp(out_config.autonomous_speech.talk_per_minute_chance, 0.0f, 1.0f);
 
     if (out_config.memory.enabled) {
         if (out_config.memory.embedding_model_path.empty()) {

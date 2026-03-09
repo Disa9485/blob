@@ -3,59 +3,105 @@
 
 #include <algorithm>
 #include <cctype>
+#include <vector>
 
 void SentenceDetector::pushToken(std::string_view token) {
-    // Filter out anything inside square brackets, even across token boundaries.
     for (char c : token) {
-        if (m_inside_brackets) {
+        if (m_inside_action) {
             if (c == ']') {
-                m_inside_brackets = false;
+                std::string action = trim(m_action_buffer);
+                m_action_buffer.clear();
+                m_inside_action = false;
+
+                if (!action.empty()) {
+                    m_ready.push_back({ SegmentType::Action, std::move(action) });
+                }
+            } else {
+                m_action_buffer.push_back(c);
             }
             continue;
         }
 
         if (c == '[') {
-            m_inside_brackets = true;
+            // Flush any complete dialogue sentences before entering action mode.
+            while (tryExtractSentenceFromDialogueBuffer()) {
+            }
+
+            // If dialogue remains but is not sentence-terminated yet, emit it as dialogue
+            // so the action can appear "below the last thing said".
+            std::string pending = trim(m_dialogue_buffer);
+            m_dialogue_buffer.clear();
+            if (!pending.empty()) {
+                m_ready.push_back({ SegmentType::Dialogue, std::move(pending) });
+            }
+
+            m_inside_action = true;
+            m_action_buffer.clear();
             continue;
         }
 
-        m_buffer.push_back(c);
-    }
+        if (c == '"') {
+            continue;
+        }
 
-    while (tryExtractSentence()) {
+        m_dialogue_buffer.push_back(c);
+
+        while (tryExtractSentenceFromDialogueBuffer()) {
+        }
     }
 }
 
-bool SentenceDetector::hasSentence() const {
+bool SentenceDetector::hasSegment() const {
     return !m_ready.empty();
 }
 
-std::string SentenceDetector::popSentence() {
+SentenceDetector::Segment SentenceDetector::popSegment() {
     if (m_ready.empty()) {
         return {};
     }
 
-    std::string out = std::move(m_ready.front());
+    Segment out = std::move(m_ready.front());
     m_ready.pop_front();
     return out;
 }
 
-std::string SentenceDetector::flushRemainder() {
-    std::string out = trim(m_buffer);
-    m_buffer.clear();
+std::vector<SentenceDetector::Segment> SentenceDetector::flushAll() {
+    std::vector<Segment> out;
+
+    while (hasSegment()) {
+        out.push_back(popSegment());
+    }
+
+    // If an action was never closed, keep it as an action instead of downgrading to dialogue.
+    if (m_inside_action) {
+        std::string action = trim(m_action_buffer);
+        m_action_buffer.clear();
+        m_inside_action = false;
+
+        if (!action.empty()) {
+            out.push_back({ SegmentType::Action, std::move(action) });
+        }
+    }
+
+    std::string tail = trim(m_dialogue_buffer);
+    m_dialogue_buffer.clear();
+
+    if (!tail.empty()) {
+        out.push_back({ SegmentType::Dialogue, std::move(tail) });
+    }
+
     return out;
 }
 
-bool SentenceDetector::tryExtractSentence() {
-    for (std::size_t i = 0; i < m_buffer.size(); ++i) {
+bool SentenceDetector::tryExtractSentenceFromDialogueBuffer() {
+    for (std::size_t i = 0; i < m_dialogue_buffer.size(); ++i) {
         if (!isSentenceTerminator(i)) {
             continue;
         }
 
-        // absorb trailing quotes/parens/spaces after punctuation
         std::size_t end = i + 1;
-        while (end < m_buffer.size()) {
-            const char c = m_buffer[end];
+        while (end < m_dialogue_buffer.size()) {
+            const char c = m_dialogue_buffer[end];
             if (c == '"' || c == '\'' || c == ')' || c == ']' || c == '}' ||
                 std::isspace(static_cast<unsigned char>(c))) {
                 ++end;
@@ -64,11 +110,11 @@ bool SentenceDetector::tryExtractSentence() {
             }
         }
 
-        std::string sentence = trim(m_buffer.substr(0, end));
-        m_buffer.erase(0, end);
+        std::string sentence = trim(m_dialogue_buffer.substr(0, end));
+        m_dialogue_buffer.erase(0, end);
 
         if (!sentence.empty()) {
-            m_ready.push_back(std::move(sentence));
+            m_ready.push_back({ SegmentType::Dialogue, std::move(sentence) });
             return true;
         }
 
@@ -79,7 +125,7 @@ bool SentenceDetector::tryExtractSentence() {
 }
 
 bool SentenceDetector::isSentenceTerminator(std::size_t index) const {
-    const char c = m_buffer[index];
+    const char c = m_dialogue_buffer[index];
     if (c != '.' && c != '!' && c != '?') {
         return false;
     }
@@ -98,12 +144,12 @@ bool SentenceDetector::isSentenceTerminator(std::size_t index) const {
 }
 
 bool SentenceDetector::looksLikeDecimal(std::size_t period_index) const {
-    if (period_index == 0 || period_index + 1 >= m_buffer.size()) {
+    if (period_index == 0 || period_index + 1 >= m_dialogue_buffer.size()) {
         return false;
     }
 
-    const unsigned char prev = static_cast<unsigned char>(m_buffer[period_index - 1]);
-    const unsigned char next = static_cast<unsigned char>(m_buffer[period_index + 1]);
+    const unsigned char prev = static_cast<unsigned char>(m_dialogue_buffer[period_index - 1]);
+    const unsigned char next = static_cast<unsigned char>(m_dialogue_buffer[period_index + 1]);
     return std::isdigit(prev) && std::isdigit(next);
 }
 
@@ -114,7 +160,7 @@ bool SentenceDetector::looksLikeAbbreviation(std::size_t period_index) const {
 
     std::size_t start = period_index;
     while (start > 0) {
-        const char c = m_buffer[start - 1];
+        const char c = m_dialogue_buffer[start - 1];
         if (std::isalpha(static_cast<unsigned char>(c)) || c == '.') {
             --start;
         } else {
@@ -122,7 +168,7 @@ bool SentenceDetector::looksLikeAbbreviation(std::size_t period_index) const {
         }
     }
 
-    std::string token = m_buffer.substr(start, period_index - start);
+    std::string token = m_dialogue_buffer.substr(start, period_index - start);
     std::string lowered;
     lowered.reserve(token.size());
 

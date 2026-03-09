@@ -182,7 +182,13 @@ namespace {
             out << "\n\n" << touch_summary;
         }
 
-        out << " You should mention this to them.";
+        if (!retrieved_memories.empty() && touch_summary.empty()) {
+            out << "\nYou should mention these memories to them.";
+        } else if (retrieved_memories.empty() && !touch_summary.empty()) {
+            out << "\nYou should mention how they touched you.";
+        } else if (!retrieved_memories.empty() && !touch_summary.empty()) {
+            out << "\nYou should mention relevant memories and how they touched you.";
+        }
 
         return out.str();
     }
@@ -233,7 +239,47 @@ void ChatUI::setTailShape(
     tail_height_ = height;
 }
 
-void ChatUI::startGeneration(const std::string& user_text) {
+bool ChatUI::isGenerating() const {
+    return generating_.load();
+}
+
+void ChatUI::startUserGeneration(const std::string& user_text) {
+    if (user_text.empty()) {
+        return;
+    }
+
+    GenerationOptions options;
+    options.consume_touch_summary = true;
+    options.ingest_prompt_memory = true;
+    options.ingest_response_memory = true;
+    startGeneration(user_text, options);
+}
+
+void ChatUI::startAutonomousGeneration(const std::string& event_text) {
+    if (event_text.empty()) {
+        return;
+    }
+
+    GenerationOptions options;
+    options.consume_touch_summary = false;
+    options.ingest_prompt_memory = false;
+    options.ingest_response_memory = true;
+    startGeneration(event_text, options);
+}
+
+void ChatUI::startAutonomousGenerationAndConsumeTouches(const std::string& event_text) {
+    if (event_text.empty()) {
+        return;
+    }
+
+    GenerationOptions options;
+    options.consume_touch_summary = true;
+    options.ingest_prompt_memory = false;
+    options.ingest_response_memory = true;
+    startGeneration(event_text, options);
+}
+
+void ChatUI::startGeneration(const std::string& user_text, const GenerationOptions& options) {
     if (generating_) {
         return;
     }
@@ -270,7 +316,9 @@ void ChatUI::startGeneration(const std::string& user_text) {
 
     std::string touch_summary;
     if (soft_body_interactor_) {
-        touch_summary = soft_body_interactor_->consumeTouchedPartsSentence(config_.userName());
+        touch_summary = options.consume_touch_summary
+            ? soft_body_interactor_->consumeTouchedPartsSentence(config_.userName())
+            : soft_body_interactor_->peekTouchedPartsSentence(config_.userName());
     }
 
     const std::string augmented_system_prompt = buildAugmentedSystemPrompt(
@@ -285,13 +333,13 @@ void ChatUI::startGeneration(const std::string& user_text) {
         last_retrieved_memory_ = retrieved_memory_text;
         last_augmented_system_prompt_ = augmented_system_prompt;
 
-        visible_bubbles_.clear();
+        visible_items_.clear();
         messages_.push_back({ "user", user_display_ts, user_iso_ts, user_text });
         messages_.push_back({ "assistant", assistant_display_ts, assistant_iso_ts, "" });
         scroll_history_to_bottom_ = true;
     }
 
-    if (memory_ && memory_->isEnabled()) {
+    if (memory_ && memory_->isEnabled() && options.ingest_prompt_memory) {
         std::string memory_error;
         memory_->ingestMessage(
             session_id_,
@@ -304,8 +352,8 @@ void ChatUI::startGeneration(const std::string& user_text) {
     }
 
     generating_ = true;
-
-    worker_ = std::thread([this, user_text, augmented_system_prompt, assistant_message_index]() {
+    const bool ingest_response_memory = options.ingest_response_memory;
+    worker_ = std::thread([this, user_text, augmented_system_prompt, assistant_message_index, ingest_response_memory]() {
         SentenceDetector detector;
 
         const bool ok = chat_.generateStreamWithSystemPrompt(
@@ -314,17 +362,25 @@ void ChatUI::startGeneration(const std::string& user_text) {
             [this, &detector](const std::string& piece) {
                 detector.pushToken(piece);
 
-                while (detector.hasSentence()) {
-                    appendAssistantSentence(detector.popSentence());
+                while (detector.hasSegment()) {
+                    SentenceDetector::Segment seg = detector.popSegment();
+                    if (seg.type == SentenceDetector::SegmentType::Dialogue) {
+                        appendAssistantDialogue(seg.text);
+                    } else if (seg.type == SentenceDetector::SegmentType::Action) {
+                        appendAssistantAction(seg.text);
+                    }
                 }
 
                 return true;
             }
         );
 
-        const std::string tail = detector.flushRemainder();
-        if (!tail.empty()) {
-            appendAssistantSentence(tail);
+        for (SentenceDetector::Segment& seg : detector.flushAll()) {
+            if (seg.type == SentenceDetector::SegmentType::Dialogue) {
+                appendAssistantDialogue(seg.text);
+            } else if (seg.type == SentenceDetector::SegmentType::Action) {
+                appendAssistantAction(seg.text);
+            }
         }
 
         std::string assistant_text;
@@ -338,7 +394,7 @@ void ChatUI::startGeneration(const std::string& user_text) {
                         messages_.back().text += "\n";
                     }
                     messages_.back().text += "[generation failed]";
-                    visible_bubbles_.push_back({ "[generation failed]" });
+                    visible_items_.push_back({ DisplayItem::Kind::Dialogue, "[generation failed]" });
                     scroll_history_to_bottom_ = true;
                 }
             }
@@ -349,7 +405,7 @@ void ChatUI::startGeneration(const std::string& user_text) {
             }
         }
 
-        if (ok && memory_ && memory_->isEnabled() && !assistant_text.empty()) {
+        if (ok && memory_ && memory_->isEnabled() && ingest_response_memory && !assistant_text.empty()) {
             std::string memory_error;
             memory_->ingestMessage(
                 session_id_,
@@ -365,7 +421,7 @@ void ChatUI::startGeneration(const std::string& user_text) {
     });
 }
 
-void ChatUI::appendAssistantSentence(const std::string& sentence) {
+void ChatUI::appendAssistantDialogue(const std::string& sentence) {
     if (sentence.empty()) {
         return;
     }
@@ -377,12 +433,32 @@ void ChatUI::appendAssistantSentence(const std::string& sentence) {
                 messages_.back().text += " ";
             }
             messages_.back().text += sentence;
-            visible_bubbles_.push_back({ sentence });
+            visible_items_.push_back({ DisplayItem::Kind::Dialogue, sentence });
             scroll_history_to_bottom_ = true;
         }
     }
 
     speech_.pushSentence(sentence);
+}
+
+void ChatUI::appendAssistantAction(const std::string& action) {
+    if (action.empty()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!messages_.empty() && messages_.back().role == "assistant") {
+            if (!messages_.back().text.empty()) {
+                messages_.back().text += " ";
+            }
+            messages_.back().text += "[" + action + "]";
+            visible_items_.push_back({ DisplayItem::Kind::Action, action });
+            scroll_history_to_bottom_ = true;
+        }
+    }
+
+    // Intentionally do not send actions to TTS.
 }
 
 std::string ChatUI::loadingDotsText() const {
@@ -482,12 +558,19 @@ void ChatUI::drawInputBar() {
     std::memcpy(buffer, input_.c_str(), (std::min)(input_.size(), sizeof(buffer) - 1));
 
     ImGui::PushItemWidth(input_width);
+
+    if (refocus_input_) {
+        ImGui::SetKeyboardFocusHere();
+        refocus_input_ = false;
+    }
+
     const bool enter_pressed = ImGui::InputText(
         "##chat_input",
         buffer,
         sizeof(buffer),
         ImGuiInputTextFlags_EnterReturnsTrue
     );
+
     ImGui::PopItemWidth();
 
     input_ = buffer;
@@ -498,7 +581,8 @@ void ChatUI::drawInputBar() {
     if (!generating_ && (send_clicked || enter_pressed) && !input_.empty()) {
         const std::string user_text = input_;
         input_.clear();
-        startGeneration(user_text);
+        startUserGeneration(user_text);
+        refocus_input_ = true;
     }
 
     ImGui::End();
@@ -590,19 +674,19 @@ void ChatUI::drawDialogueBubbles() {
         return;
     }
 
-    std::vector<DialogueBubble> bubbles_copy;
+    std::vector<DisplayItem> items_copy;
     bool generating_now = generating_.load();
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        bubbles_copy = visible_bubbles_;
+        items_copy = visible_items_;
     }
 
     if (generating_now) {
-        bubbles_copy.push_back({ loadingDotsText() });
+        items_copy.push_back({ DisplayItem::Kind::Dialogue, loadingDotsText() });
     }
 
-    if (bubbles_copy.empty()) {
+    if (items_copy.empty()) {
         return;
     }
 
@@ -614,68 +698,111 @@ void ChatUI::drawDialogueBubbles() {
     );
 
     const float bubble_max_width = (std::min)(420.0f, viewport->WorkSize.x * 0.33f);
-    const float pad_x = 16.0f;
-    const float pad_y = 12.0f;
-    const float spacing_y = 10.0f;
+    const float bubble_pad_x = 16.0f;
+    const float bubble_pad_y = 12.0f;
+    const float bubble_spacing_y = 10.0f;
+    const float action_gap_above = 3.0f;
+    const float action_gap_below = 5.0f;
     const float rounding = 18.0f;
-    const float wrap_width = bubble_max_width - pad_x * 2.0f;
+    const float wrap_width = bubble_max_width - bubble_pad_x * 2.0f;
 
     float current_y = anchor.y + bubble_stack_offset_y_;
     const float start_x = anchor.x + bubble_stack_offset_x_;
 
-    for (std::size_t i = 0; i < bubbles_copy.size(); ++i) {
-        const bool draw_tail = (i == 0);
+    bool tail_drawn = false;
 
-        const ImVec2 text_size = ImGui::CalcTextSize(
-            bubbles_copy[i].text.c_str(),
-            nullptr,
-            false,
-            wrap_width
-        );
+    for (const DisplayItem& item : items_copy) {
+        if (item.kind == DisplayItem::Kind::Dialogue) {
+            const bool draw_tail = !tail_drawn;
+            tail_drawn = true;
 
-        const float bubble_w = text_size.x + pad_x * 2.0f;
-        const float bubble_h = text_size.y + pad_y * 2.0f;
-
-        const ImVec2 rect_min(start_x, current_y);
-        const ImVec2 rect_max(start_x + bubble_w, current_y + bubble_h);
-
-        const ImU32 fill_col = IM_COL32(248, 248, 252, 255);
-        const ImU32 text_col = IM_COL32(20, 20, 24, 255);
-
-        draw->AddRectFilled(rect_min, rect_max, fill_col, rounding);
-
-        if (draw_tail) {
-            const ImVec2 tail_a(
-                rect_min.x + tail_attach_x_,
-                rect_min.y + tail_attach_y_
+            const ImVec2 text_size = ImGui::CalcTextSize(
+                item.text.c_str(),
+                nullptr,
+                false,
+                wrap_width
             );
 
-            const ImVec2 tail_b(
-                rect_min.x + tail_attach_x_,
-                rect_min.y + tail_attach_y_ + tail_height_
+            const float bubble_w = text_size.x + bubble_pad_x * 2.0f;
+            const float bubble_h = text_size.y + bubble_pad_y * 2.0f;
+
+            const ImVec2 rect_min(start_x, current_y);
+            const ImVec2 rect_max(start_x + bubble_w, current_y + bubble_h);
+
+            const ImU32 fill_col = IM_COL32(248, 248, 252, 255);
+            const ImU32 text_col = IM_COL32(20, 20, 24, 255);
+
+            draw->AddRectFilled(rect_min, rect_max, fill_col, rounding);
+
+            if (draw_tail) {
+                const ImVec2 tail_a(
+                    rect_min.x + tail_attach_x_,
+                    rect_min.y + tail_attach_y_
+                );
+
+                const ImVec2 tail_b(
+                    rect_min.x + tail_attach_x_,
+                    rect_min.y + tail_attach_y_ + tail_height_
+                );
+
+                const ImVec2 tail_c(
+                    rect_min.x + tail_attach_x_ - tail_width_,
+                    rect_min.y + tail_attach_y_
+                );
+
+                draw->AddTriangleFilled(tail_a, tail_b, tail_c, fill_col);
+            }
+
+            const ImVec2 text_pos(rect_min.x + bubble_pad_x, rect_min.y + bubble_pad_y);
+
+            draw->AddText(
+                nullptr,
+                0.0f,
+                text_pos,
+                text_col,
+                item.text.c_str(),
+                nullptr,
+                wrap_width
             );
 
-            const ImVec2 tail_c(
-                rect_min.x + tail_attach_x_ - tail_width_,
-                rect_min.y + tail_attach_y_
+            current_y += bubble_h + bubble_spacing_y;
+        } else {
+            const ImU32 action_text_col = IM_COL32(210, 210, 218, 255);
+            const float action_wrap_width = bubble_max_width;
+
+            const ImVec2 action_text_size = ImGui::CalcTextSize(
+                item.text.c_str(),
+                nullptr,
+                false,
+                action_wrap_width
             );
 
-            draw->AddTriangleFilled(tail_a, tail_b, tail_c, fill_col);
+            // Nudge action upward a bit so it visually sits between bubbles.
+            current_y -= (bubble_spacing_y - action_gap_above);
+            const ImVec2 text_pos(start_x, current_y - 2.0f);
+
+            draw->AddText(
+                nullptr,
+                0.0f,
+                text_pos,
+                action_text_col,
+                item.text.c_str(),
+                nullptr,
+                action_wrap_width
+            );
+
+            draw->AddText(
+                nullptr,
+                0.0f,
+                ImVec2(text_pos.x + 1.0f, text_pos.y),
+                action_text_col,
+                item.text.c_str(),
+                nullptr,
+                action_wrap_width
+            );
+
+            current_y += action_text_size.y + action_gap_below;
         }
-
-        const ImVec2 text_pos(rect_min.x + pad_x, rect_min.y + pad_y);
-
-        draw->AddText(
-            nullptr,
-            0.0f,
-            text_pos,
-            text_col,
-            bubbles_copy[i].text.c_str(),
-            nullptr,
-            wrap_width
-        );
-
-        current_y += bubble_h + spacing_y;
     }
 }
 

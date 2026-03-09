@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <cstdint>
 
 namespace physics {
 
@@ -51,6 +52,11 @@ public:
     void endDrag(cpSpace* space);
 
     bool isDragging() const { return grabSpring_ != nullptr; }
+    bool touchedSomethingRecently() const;
+    bool hasPendingTouchedParts() const;
+    std::string peekTouchedPartsSentence(const std::string& userName) const;
+
+    std::uint64_t touchEventSerial() const { return touchEventSerial_; }
     cpBody* grabbedBody() const { return grabbedBody_; }
     const RenderPart* grabbedPart() const { return grabbedPart_; }
 
@@ -81,6 +87,7 @@ private:
     cpVect grabbedLocalAnchor_ = cpvzero;
     cpConstraint* grabSpring_ = nullptr;
 
+    std::uint64_t touchEventSerial_ = 0;
     std::vector<std::string> touchedPartsHumanReadable_;
     std::unordered_set<std::string> touchedPartsSeen_;
 };

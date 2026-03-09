@@ -12,7 +12,32 @@ struct WindowConfig {
     std::string glsl_version = "#version 330";
     bool vsync = true;
     bool fullscreen = false;
+    int anti_aliasing_samples = 4;
 };
+
+struct LightingConfig {
+    bool enabled = true;
+
+    // Ambient base fill.
+    float ambient_intensity = 0.82f;
+    float ambient_warmth = 0.08f;
+
+    // Main warm light in normalized screen space.
+    float light_x = 0.72f;
+    float light_y = 0.18f;
+    float light_intensity = 0.55f;
+    float light_radius = 0.75f;
+    float light_softness = 1.35f;
+
+    // Warm cozy light tint.
+    float light_r = 1.00f;
+    float light_g = 0.84f;
+    float light_b = 0.68f;
+
+    // Slight vignette to make the scene feel less flat.
+    float vignette_strength = 0.12f;
+};
+
 
 struct TtsWarpConfig {
     bool enabled = true;
@@ -64,6 +89,12 @@ struct MemoryConfig {
     int session_recent_exclusion_count = 20;
 };
 
+struct AutonomousSpeechConfig {
+    float talk_on_boot_chance = 0.35f;
+    float talk_on_touch_chance = 0.20f;
+    float talk_per_minute_chance = 0.10f;
+};
+
 struct AppConfig {
     static constexpr std::size_t kSystemPromptNameIndex = 1;
     static constexpr std::size_t kSystemPromptUserNameIndex = 6;
@@ -86,6 +117,8 @@ struct AppConfig {
     std::vector<std::string> dynamic_system_prompt = {
     };
     LlamaChat::Options llm_options;
+    AutonomousSpeechConfig autonomous_speech;
+    LightingConfig lighting;
     TtsConfig tts;
     MemoryConfig memory;
 

@@ -13,6 +13,12 @@
 
 namespace physics {
 
+struct SceneDialogueAnchorConfig {
+    std::string part;
+    Vec2 attach = { 0.0f, 0.0f };   // PSD/canvas pixel coordinates
+    bool enabled = false;
+};
+    
 struct ScenePlacementConfig {
     float scale = 0.35f;
     Vec2 spawnPosition = { 0.5f, 0.5f };
@@ -74,6 +80,7 @@ struct SceneJointConfig {
 
 struct SceneConfig {
     ScenePlacementConfig scene;
+    SceneDialogueAnchorConfig dialogueAnchor;
     std::unordered_map<std::string, SceneSoftOverride> softOverrides;
     SceneCollisionRulesConfig collisionRules;
     std::vector<std::string> renderOrder;

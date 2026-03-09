@@ -36,6 +36,19 @@ namespace {
         { 7680, 4320, "7680 x 4320 (8K)" }
     }};
 
+    struct AntiAliasingOption {
+        int samples;
+        const char* label;
+    };
+
+    constexpr std::array<AntiAliasingOption, 5> kAntiAliasingOptions = {{
+        { 0,  "Off" },
+        { 2,  "MSAA 2x" },
+        { 4,  "MSAA 4x" },
+        { 8,  "MSAA 8x" },
+        { 16, "MSAA 16x" }
+    }};
+
     int nearestPowerOfTwoIndex(int value, int min_power, int max_power) {
         int best_power = min_power;
         int best_diff = std::abs(value - (1 << min_power));
@@ -484,6 +497,40 @@ void SaveLauncher::drawSaveList() {
     }
 }
 
+bool SaveLauncher::drawAntiAliasingCombo(
+    const char* label,
+    int& samples,
+    const char* tooltip)
+{
+    int current_index = 0;
+    for (int i = 0; i < static_cast<int>(kAntiAliasingOptions.size()); ++i) {
+        if (kAntiAliasingOptions[i].samples == samples) {
+            current_index = i;
+            break;
+        }
+    }
+
+    const char* preview = kAntiAliasingOptions[current_index].label;
+    bool changed = false;
+
+    if (ImGui::BeginCombo(label, preview)) {
+        for (int i = 0; i < static_cast<int>(kAntiAliasingOptions.size()); ++i) {
+            const bool selected = (i == current_index);
+            if (ImGui::Selectable(kAntiAliasingOptions[i].label, selected)) {
+                samples = kAntiAliasingOptions[i].samples;
+                changed = true;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    drawDelayedTooltip(label, tooltip);
+    return changed;
+}
+
 void SaveLauncher::drawSettingsEditor() {
     if (!settings_loaded_ ||
         settings_index_ < 0 ||
@@ -519,9 +566,42 @@ void SaveLauncher::drawSettingsEditor() {
             &config.window.vsync,
             "Synchronizes frame presentation to your monitor refresh rate to reduce tearing."
         );
+
+        drawAntiAliasingCombo(
+            "Anti-Aliasing",
+            config.window.anti_aliasing_samples,
+            "Controls multisample anti-aliasing. Higher values smooth edges better but may reduce performance. Applied when launching the save."
+        );
     }
 
     if (ImGui::CollapsingHeader("LLM (Advanced)")) {
+        sliderFloatWithTooltip(
+            "Talk On Boot Chance",
+            &config.autonomous_speech.talk_on_boot_chance,
+            0.0f,
+            1.0f,
+            "Chance that the robot speaks on its own when the save first loads.",
+            "%.2f"
+        );
+
+        sliderFloatWithTooltip(
+            "Talk On Touch Chance",
+            &config.autonomous_speech.talk_on_touch_chance,
+            0.0f,
+            1.0f,
+            "Chance that the robot speaks on its own when the user starts touching it.",
+            "%.2f"
+        );
+
+        sliderFloatWithTooltip(
+            "Talk Per Minute Chance",
+            &config.autonomous_speech.talk_per_minute_chance,
+            0.0f,
+            1.0f,
+            "Chance per minute that the robot speaks on its own while the user is present but silent.",
+            "%.2f"
+        );
+
         checkboxWithTooltip(
             "Greedy",
             &config.llm_options.greedy,
@@ -690,6 +770,9 @@ void SaveLauncher::drawSettingsEditor() {
     clampValue(config.llm_options.temperature, 0.0f, 2.0f);
     clampValue(config.llm_options.top_k, 1, 200);
     clampValue(config.llm_options.top_p, 0.05f, 1.0f);
+    clampValue(config.autonomous_speech.talk_on_boot_chance, 0.0f, 1.0f);
+    clampValue(config.autonomous_speech.talk_on_touch_chance, 0.0f, 1.0f);
+    clampValue(config.autonomous_speech.talk_per_minute_chance, 0.0f, 1.0f);
 
     clampValue(config.memory.n_threads, 1, 64);
     clampValue(config.memory.n_batch, 1, 4096);

@@ -31,7 +31,18 @@ public:
     ChatUI(const ChatUI&) = delete;
     ChatUI& operator=(const ChatUI&) = delete;
 
+    struct GenerationOptions {
+        bool consume_touch_summary = false;
+        bool ingest_prompt_memory = true;
+        bool ingest_response_memory = true;
+    };
+
     void draw();
+
+    bool isGenerating() const;
+    void startUserGeneration(const std::string& user_text);
+    void startAutonomousGeneration(const std::string& event_text);
+    void startAutonomousGenerationAndConsumeTouches(const std::string& event_text);
 
     void setSpeakerAnchorNormalized(const ImVec2& normalizedAnchor);
     void setBubblePlacement(float offsetX, float offsetY);
@@ -50,12 +61,19 @@ private:
         std::string text;
     };
 
-    struct DialogueBubble {
+    struct DisplayItem {
+        enum class Kind {
+            Dialogue,
+            Action
+        };
+
+        Kind kind = Kind::Dialogue;
         std::string text;
     };
 
-    void startGeneration(const std::string& user_text);
-    void appendAssistantSentence(const std::string& sentence);
+    void startGeneration(const std::string& user_text, const GenerationOptions& options);
+    void appendAssistantDialogue(const std::string& sentence);
+    void appendAssistantAction(const std::string& action);
 
     void drawTopClock();
     void drawInputBar();
@@ -72,7 +90,7 @@ private:
     physics::SoftBodyInteractor* soft_body_interactor_ = nullptr;
 
     std::vector<Entry> messages_;
-    std::vector<DialogueBubble> visible_bubbles_;
+    std::vector<DisplayItem> visible_items_;
 
     int64_t session_id_ = 0;
     int64_t next_message_index_ = 0;
@@ -86,11 +104,12 @@ private:
 
     std::atomic<bool> generating_{false};
     bool scroll_history_to_bottom_ = false;
+    bool refocus_input_ = true;
 
     ImVec2 speaker_anchor_normalized_ = ImVec2(0.5f, 0.5f);
 
-    float bubble_stack_offset_x_ = 22.0f;
-    float bubble_stack_offset_y_ = -120.0f;
+    float bubble_stack_offset_x_ = 25.0f;
+    float bubble_stack_offset_y_ = 0.0f;
 
     float tail_attach_x_ = 15.0f;   // x position on bubble from left edge
     float tail_attach_y_ = 0.0f;    // y position on bubble from top edge

@@ -16,6 +16,7 @@ bool GameRenderer::initialize(std::string& error) {
 
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
+    glEnable(GL_MULTISAMPLE);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     static const char* VS_SRC = R"GLSL(
@@ -36,9 +37,58 @@ bool GameRenderer::initialize(std::string& error) {
         #version 330 core
         in vec2 vUV;
         out vec4 FragColor;
+
         uniform sampler2D uTex;
+        uniform vec2 uScreen;
+
+        uniform int uLightingEnabled;
+        uniform float uAmbientIntensity;
+        uniform float uAmbientWarmth;
+        uniform vec2 uLightPos;
+        uniform vec3 uLightColor;
+        uniform float uLightIntensity;
+        uniform float uLightRadius;
+        uniform float uLightSoftness;
+        uniform float uVignetteStrength;
+
         void main() {
-            FragColor = texture(uTex, vUV);
+            vec4 tex = texture(uTex, vUV);
+
+            if (tex.a <= 0.001) {
+                discard;
+            }
+
+            vec3 color = tex.rgb;
+
+            if (uLightingEnabled == 0) {
+                FragColor = tex;
+                return;
+            }
+
+            vec2 fragNorm = gl_FragCoord.xy / uScreen.xy;
+            vec2 toLight = fragNorm - uLightPos;
+            float dist = length(toLight);
+
+            float radial = 1.0 - smoothstep(0.0, uLightRadius, dist);
+            radial = pow(max(radial, 0.0), uLightSoftness);
+
+            vec3 ambientTint = vec3(
+                1.0,
+                1.0 - 0.18 * uAmbientWarmth,
+                1.0 - 0.32 * uAmbientWarmth
+            );
+
+            vec3 ambient = ambientTint * uAmbientIntensity;
+            vec3 keyLight = uLightColor * (uLightIntensity * radial);
+
+            vec2 centered = fragNorm * 2.0 - 1.0;
+            float vignette = dot(centered, centered);
+            float vignetteFactor = 1.0 - clamp(vignette * uVignetteStrength, 0.0, 0.75);
+
+            vec3 lit = color * (ambient + keyLight);
+            lit *= vignetteFactor;
+
+            FragColor = vec4(lit, tex.a);
         }
     )GLSL";
 
@@ -49,6 +99,16 @@ bool GameRenderer::initialize(std::string& error) {
 
     uScreenLoc_ = glGetUniformLocation(program_, "uScreen");
     uTexLoc_ = glGetUniformLocation(program_, "uTex");
+
+    uLightingEnabledLoc_ = glGetUniformLocation(program_, "uLightingEnabled");
+    uAmbientIntensityLoc_ = glGetUniformLocation(program_, "uAmbientIntensity");
+    uAmbientWarmthLoc_ = glGetUniformLocation(program_, "uAmbientWarmth");
+    uLightPosLoc_ = glGetUniformLocation(program_, "uLightPos");
+    uLightColorLoc_ = glGetUniformLocation(program_, "uLightColor");
+    uLightIntensityLoc_ = glGetUniformLocation(program_, "uLightIntensity");
+    uLightRadiusLoc_ = glGetUniformLocation(program_, "uLightRadius");
+    uLightSoftnessLoc_ = glGetUniformLocation(program_, "uLightSoftness");
+    uVignetteStrengthLoc_ = glGetUniformLocation(program_, "uVignetteStrength");
 
     glGenVertexArrays(1, &quadVao_);
     glGenBuffers(1, &quadVbo_);
@@ -162,6 +222,10 @@ GLuint GameRenderer::createProgram(const char* vsSrc, const char* fsSrc, std::st
     return program;
 }
 
+void GameRenderer::setLightingConfig(const LightingConfig& config) {
+    lighting_ = config;
+}
+
 GLuint GameRenderer::uploadTextureRGBA(const std::uint8_t* rgba, int w, int h) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
@@ -190,6 +254,16 @@ void GameRenderer::beginFrame(int framebufferWidth, int framebufferHeight) {
     glUseProgram(program_);
     glUniform2f(uScreenLoc_, static_cast<float>(framebufferWidth_), static_cast<float>(framebufferHeight_));
     glActiveTexture(GL_TEXTURE0);
+
+    glUniform1i(uLightingEnabledLoc_, lighting_.enabled ? 1 : 0);
+    glUniform1f(uAmbientIntensityLoc_, lighting_.ambient_intensity);
+    glUniform1f(uAmbientWarmthLoc_, lighting_.ambient_warmth);
+    glUniform2f(uLightPosLoc_, lighting_.light_x, lighting_.light_y);
+    glUniform3f(uLightColorLoc_, lighting_.light_r, lighting_.light_g, lighting_.light_b);
+    glUniform1f(uLightIntensityLoc_, lighting_.light_intensity);
+    glUniform1f(uLightRadiusLoc_, lighting_.light_radius);
+    glUniform1f(uLightSoftnessLoc_, lighting_.light_softness);
+    glUniform1f(uVignetteStrengthLoc_, lighting_.vignette_strength);
 }
 
 void GameRenderer::setBackgroundTexture(GLuint texture) {

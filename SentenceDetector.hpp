@@ -8,26 +8,37 @@
 
 class SentenceDetector {
 public:
-    void pushToken(std::string_view token);
-    bool hasSentence() const;
-    std::string popSentence();
+    enum class SegmentType {
+        Dialogue,
+        Action
+    };
 
-    // Flush remaining text at end of stream if needed
-    std::string flushRemainder();
+    struct Segment {
+        SegmentType type = SegmentType::Dialogue;
+        std::string text;
+    };
+
+    void pushToken(std::string_view token);
+
+    bool hasSegment() const;
+    Segment popSegment();
+
+    std::vector<Segment> flushAll();
 
 private:
-    bool tryExtractSentence();
+    bool tryExtractSentenceFromDialogueBuffer();
+
     bool isSentenceTerminator(std::size_t index) const;
     bool looksLikeAbbreviation(std::size_t period_index) const;
     bool looksLikeDecimal(std::size_t period_index) const;
-    void appendFiltered(std::string_view token);
 
     static std::string trim(std::string s);
 
 private:
-    std::string m_buffer;
-    std::deque<std::string> m_ready;
-    bool m_inside_brackets = false;
+    std::string m_dialogue_buffer;
+    std::string m_action_buffer;
+    std::deque<Segment> m_ready;
+    bool m_inside_action = false;
 
     const std::unordered_set<std::string> m_abbreviations = {
         "mr", "mrs", "ms", "dr", "prof", "sr", "jr",

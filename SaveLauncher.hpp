@@ -25,6 +25,7 @@ private:
     void refreshSaveList();
     void drawSaveList();
     void drawSettingsEditor();
+    bool drawAntiAliasingCombo(const char* label, int& samples, const char* tooltip);
     void drawCreateSavePopup();
     void drawDeleteSavePopup();
 

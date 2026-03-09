@@ -80,6 +80,10 @@ bool ImGuiLayer::initialize(GLFWwindow* window, const char* glsl_version) {
 
     colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.45f);
 
+    colors[ImGuiCol_NavHighlight]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_BorderShadow]       = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_TextSelectedBg]     = ImVec4(0.30f, 0.45f, 0.65f, 0.35f);
+
     if (!ImGui_ImplGlfw_InitForOpenGL(window_, true)) {
         return false;
     }

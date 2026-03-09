@@ -3,6 +3,7 @@
 
 #include "PhysicsRuntimeTypes.hpp"
 #include "PhysicsTypes.hpp"
+#include "AppConfig.hpp"
 
 #include <glad/glad.h>
 
@@ -32,6 +33,8 @@ public:
     void renderParts(const std::vector<physics::RenderItem>& items);
     void endFrame();
 
+    void setLightingConfig(const LightingConfig& config);
+
     GLuint uploadTextureRGBA(const std::uint8_t* rgba, int w, int h);
 
     bool initializeSoftRenderMesh(physics::RenderPart& part, std::string& error);
@@ -55,6 +58,18 @@ private:
         float u0, float v0,
         float u1, float v1
     );
+
+    LightingConfig lighting_{};
+
+    GLint uLightingEnabledLoc_ = -1;
+    GLint uAmbientIntensityLoc_ = -1;
+    GLint uAmbientWarmthLoc_ = -1;
+    GLint uLightPosLoc_ = -1;
+    GLint uLightColorLoc_ = -1;
+    GLint uLightIntensityLoc_ = -1;
+    GLint uLightRadiusLoc_ = -1;
+    GLint uLightSoftnessLoc_ = -1;
+    GLint uVignetteStrengthLoc_ = -1;
 
     GLuint program_ = 0;
     GLint uScreenLoc_ = -1;
