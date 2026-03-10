@@ -7,20 +7,20 @@
 namespace physics {
 
 void buildRenderRegistry(
-    const std::vector<RenderPart>& parts,
+    std::vector<RenderPart>& parts,
     std::unordered_map<std::string, RenderItem>& out
 ) {
     out.clear();
     out.reserve(parts.size() * 2);
 
-    for (const RenderPart& p : parts) {
+    for (RenderPart& p : parts) {
         RenderItem ri;
         ri.kind = RenderItemKind::Part;
         ri.part = &p;
         out[p.name] = ri;
     }
 
-    for (const RenderPart& p : parts) {
+    for (RenderPart& p : parts) {
         if (p.kind != PartKind::Soft) {
             continue;
         }

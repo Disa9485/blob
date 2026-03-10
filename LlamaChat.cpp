@@ -54,6 +54,8 @@ bool LlamaChat::initialize(
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = options.n_gpu_layers;
+    model_params.progress_callback = &LlamaChat::modelLoadProgressCallback;
+    model_params.progress_callback_user_data = this;
 
     model_.reset(llama_model_load_from_file(model_path.c_str(), model_params));
     if (!model_) {
@@ -235,6 +237,8 @@ bool LlamaChat::createContextAndSampler() {
     ctx_params.n_batch = options_.n_ctx;
     ctx_params.n_ubatch = options_.n_ctx;
     ctx_params.no_perf = true;
+    ctx_params.abort_callback = &LlamaChat::decodeAbortCallback;
+    ctx_params.abort_callback_data = this;
 
     ctx_.reset(llama_init_from_model(model_.get(), ctx_params));
     if (!ctx_) {
@@ -268,6 +272,10 @@ bool LlamaChat::evalTokens(const std::vector<int32_t>& tokens) {
         return false;
     }
 
+    if (stopRequested()) {
+        return false;
+    }
+
     if (tokens.empty()) {
         return true;
     }
@@ -279,7 +287,12 @@ bool LlamaChat::evalTokens(const std::vector<int32_t>& tokens) {
         static_cast<int32_t>(llama_tokens.size())
     );
 
-    if (llama_decode(ctx_.get(), batch) != 0) {
+    const int rc = llama_decode(ctx_.get(), batch);
+    if (rc != 0) {
+        return false;
+    }
+
+    if (stopRequested()) {
         return false;
     }
 
@@ -399,6 +412,10 @@ bool LlamaChat::generateStreamWithSystemPrompt(
         return false;
     }
 
+    if (stopRequested()) {
+        return false;
+    }
+
     const std::string prompt = buildTurnPrompt(user_message, system_prompt_override);
 
     std::vector<int32_t> prompt_tokens_raw;
@@ -466,4 +483,22 @@ bool LlamaChat::generateStreamWithSystemPrompt(
     trimHistory();
 
     return true;
+}
+
+void LlamaChat::setCancellation(RuntimeCancellation* cancellation) {
+    cancellation_ = cancellation;
+}
+
+bool LlamaChat::stopRequested() const {
+    return cancellation_ && cancellation_->stop_requested.load();
+}
+
+bool LlamaChat::modelLoadProgressCallback(float, void* user_data) {
+    const auto* self = static_cast<LlamaChat*>(user_data);
+    return self ? !self->stopRequested() : true;
+}
+
+bool LlamaChat::decodeAbortCallback(void* user_data) {
+    const auto* self = static_cast<LlamaChat*>(user_data);
+    return self ? self->stopRequested() : false;
 }

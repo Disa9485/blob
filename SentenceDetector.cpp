@@ -138,6 +138,10 @@ bool SentenceDetector::isSentenceTerminator(std::size_t index) const {
         if (looksLikeAbbreviation(index)) {
             return false;
         }
+
+        if (looksLikeEllipsis(index)) {
+            return false;
+        }
     }
 
     return true;
@@ -177,6 +181,55 @@ bool SentenceDetector::looksLikeAbbreviation(std::size_t period_index) const {
     }
 
     return m_abbreviations.find(lowered) != m_abbreviations.end();
+}
+
+bool SentenceDetector::looksLikeEllipsis(std::size_t period_index) const {
+    if (period_index >= m_dialogue_buffer.size() || m_dialogue_buffer[period_index] != '.') {
+        return false;
+    }
+
+    auto scanLeftForDot = [&](std::size_t index) -> bool {
+        while (index > 0) {
+            --index;
+            const char c = m_dialogue_buffer[index];
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                continue;
+            }
+            return c == '.';
+        }
+        return false;
+    };
+
+    auto scanRightForDot = [&](std::size_t index) -> bool {
+        ++index;
+        while (index < m_dialogue_buffer.size()) {
+            const char c = m_dialogue_buffer[index];
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                ++index;
+                continue;
+            }
+            return c == '.';
+        }
+        return false;
+    };
+
+    return scanLeftForDot(period_index) || scanRightForDot(period_index);
+}
+
+bool SentenceDetector::isOnlyEllipsisLike(std::string_view s) {
+    bool saw_dot = false;
+
+    for (char c : s) {
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            continue;
+        }
+        if (c != '.') {
+            return false;
+        }
+        saw_dot = true;
+    }
+
+    return saw_dot;
 }
 
 std::string SentenceDetector::trim(std::string s) {

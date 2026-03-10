@@ -47,11 +47,16 @@ struct SoftRenderMesh {
 struct SoftOverlay {
     std::string name;
     GLuint tex = 0;
+    bool visible = true;
+    bool unlit = false;
+    bool emissive = false;
 };
 
 struct RenderPart {
     std::string name;
     PartKind kind = PartKind::Rigid;
+
+    bool visible = true;
 
     cpGroup collisionGroup = 0;
     std::uint32_t collisionId = 0;
@@ -63,12 +68,15 @@ struct RenderPart {
     SoftRenderMesh softRender;
     std::vector<SoftOverlay> overlays;
 
+    bool unlit = false;
+    bool emissive = false;
+
     Vec2 anchorCanvas;
 };
 
 struct RenderItem {
     RenderItemKind kind = RenderItemKind::Part;
-    const RenderPart* part = nullptr;
+    RenderPart* part = nullptr;
     int overlayIndex = -1;
 };
 

@@ -13,6 +13,7 @@ struct WindowConfig {
     bool vsync = true;
     bool fullscreen = false;
     int anti_aliasing_samples = 4;
+    bool debug_mode = false;
 };
 
 struct LightingConfig {
@@ -96,26 +97,21 @@ struct AutonomousSpeechConfig {
 };
 
 struct AppConfig {
-    static constexpr std::size_t kSystemPromptNameIndex = 1;
-    static constexpr std::size_t kSystemPromptUserNameIndex = 6;
-
     std::string model_path = "model.gguf";
     std::string last_opened_iso8601;
     std::string current_room = "lab";
     WindowConfig window;
-    std::vector<std::string> static_system_prompt = {
-        "You are named ",
-        "Assistant",
-        ".",
-        "You are talking to ",
-        "",
-        "",
-        "John",
-        "."
-    };
 
+    std::string llm_name = "Assistant";
+    std::string user_name = "John";
+
+    std::vector<std::string> static_system_prompt = {
+        "You are named <llm_name>.",
+        "You are talking to <user_name>."
+    };
     std::vector<std::string> dynamic_system_prompt = {
     };
+
     LlamaChat::Options llm_options;
     AutonomousSpeechConfig autonomous_speech;
     LightingConfig lighting;

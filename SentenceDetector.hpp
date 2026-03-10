@@ -31,6 +31,8 @@ private:
     bool isSentenceTerminator(std::size_t index) const;
     bool looksLikeAbbreviation(std::size_t period_index) const;
     bool looksLikeDecimal(std::size_t period_index) const;
+    bool looksLikeEllipsis(std::size_t period_index) const;
+    static bool isOnlyEllipsisLike(std::string_view s);
 
     static std::string trim(std::string s);
 

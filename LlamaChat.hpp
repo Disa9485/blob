@@ -1,6 +1,8 @@
 // LlamaChat.hpp
 #pragma once
 
+#include "RuntimeCancellation.hpp"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -11,6 +13,7 @@ struct llama_model;
 struct llama_context;
 struct llama_vocab;
 struct llama_sampler;
+struct RuntimeCancellation;
 
 class LlamaChat {
 public:
@@ -71,6 +74,8 @@ public:
 
     const std::vector<Message>& history() const;
 
+    void setCancellation(RuntimeCancellation* cancellation);
+
 private:
     struct BackendGuard;
 
@@ -101,6 +106,9 @@ private:
     bool tokenizePrompt(const std::string& text, std::vector<int32_t>& out_tokens) const;
     void trimHistory();
 
+    static bool modelLoadProgressCallback(float progress, void* user_data);
+    static bool decodeAbortCallback(void* user_data);
+
     std::unique_ptr<BackendGuard> backend_;
     std::unique_ptr<llama_model, ModelDeleter> model_;
     const llama_vocab* vocab_ = nullptr;
@@ -115,4 +123,7 @@ private:
     std::string static_system_prompt_;
     Options options_;
     std::vector<Message> history_;
+
+    RuntimeCancellation* cancellation_ = nullptr;
+    bool stopRequested() const;
 };

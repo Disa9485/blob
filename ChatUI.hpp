@@ -7,6 +7,7 @@
 #include "SentenceDetector.hpp"
 #include "SoftBodyInteractor.hpp"
 #include "SpeechPipeline.hpp"
+#include "RuntimeCancellation.hpp"
 
 #include "imgui.h"
 
@@ -40,6 +41,7 @@ public:
     void draw();
 
     bool isGenerating() const;
+    void requestStopGeneration();   // add this
     void startUserGeneration(const std::string& user_text);
     void startAutonomousGeneration(const std::string& event_text);
     void startAutonomousGenerationAndConsumeTouches(const std::string& event_text);
@@ -52,6 +54,8 @@ public:
         float width,
         float height
     );
+
+    void setCancellation(RuntimeCancellation* cancellation);
 
 private:
     struct Entry {
@@ -103,6 +107,7 @@ private:
     std::mutex mutex_;
 
     std::atomic<bool> generating_{false};
+    std::atomic<bool> stop_requested_{false};   // add this
     bool scroll_history_to_bottom_ = false;
     bool refocus_input_ = true;
 
@@ -111,8 +116,10 @@ private:
     float bubble_stack_offset_x_ = 25.0f;
     float bubble_stack_offset_y_ = 0.0f;
 
-    float tail_attach_x_ = 15.0f;   // x position on bubble from left edge
-    float tail_attach_y_ = 0.0f;    // y position on bubble from top edge
-    float tail_width_ = 24.0f;      // how far tail extends left
-    float tail_height_ = 18.0f;     // vertical size of tail
+    float tail_attach_x_ = 15.0f;
+    float tail_attach_y_ = 0.0f;
+    float tail_width_ = 24.0f;
+    float tail_height_ = 18.0f;
+
+    RuntimeCancellation* cancellation_ = nullptr;
 };

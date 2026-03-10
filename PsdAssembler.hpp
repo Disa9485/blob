@@ -54,6 +54,10 @@ struct PsdAssembly {
     std::unique_ptr<CollisionRules> collisionRules;
 
     DialogueAnchorRuntime dialogueAnchor;
+
+    bool setItemVisible(const std::string& name, bool visible);
+    bool isItemVisible(const std::string& name) const;
+    void setOnlyVisible(const std::vector<std::string>& namesToHideShow, const std::string& visibleName);
 };
 
 struct SceneFiles {

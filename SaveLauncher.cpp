@@ -572,6 +572,12 @@ void SaveLauncher::drawSettingsEditor() {
             config.window.anti_aliasing_samples,
             "Controls multisample anti-aliasing. Higher values smooth edges better but may reduce performance. Applied when launching the save."
         );
+
+        checkboxWithTooltip(
+            "Debug Overlay",
+            &config.window.debug_mode,
+            "Shows real-time performance information in the top-right corner during gameplay."
+        );
     }
 
     if (ImGui::CollapsingHeader("LLM (Advanced)")) {

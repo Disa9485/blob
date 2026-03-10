@@ -435,6 +435,12 @@ static cpBool allowListBegin(cpArbiter* arb, cpSpace* space, cpDataPointer) {
     return (rules->allowedPairs.find(key) != rules->allowedPairs.end()) ? cpTrue : cpFalse;
 }
 
+static bool isEyeLayerName(const std::string& name) {
+    return name.find("eye") != std::string::npos ||
+           name.find("Eye") != std::string::npos ||
+           name.find("eyes") != std::string::npos;
+}
+
 } // namespace
 
 bool PsdAssembler::resolveSceneFiles(
@@ -476,6 +482,79 @@ bool PsdAssembler::getDialogueAnchorNormalized(
     outNormalized.x = std::clamp(outNormalized.x, 0.0f, 1.0f);
     outNormalized.y = std::clamp(outNormalized.y, 0.0f, 1.0f);
     return true;
+}
+
+bool PsdAssembly::setItemVisible(const std::string& name, bool visible) {
+    auto it = renderRegistry.find(name);
+    if (it == renderRegistry.end()) {
+        return false;
+    }
+
+    RenderItem& ri = it->second;
+    if (!ri.part) {
+        return false;
+    }
+
+    if (ri.kind == RenderItemKind::Part) {
+        ri.part->visible = visible;
+        return true;
+    }
+
+    if (ri.kind == RenderItemKind::SoftOverlay) {
+        if (ri.part->kind != PartKind::Soft) {
+            return false;
+        }
+
+        if (ri.overlayIndex < 0 ||
+            ri.overlayIndex >= static_cast<int>(ri.part->overlays.size())) {
+            return false;
+        }
+
+        ri.part->overlays[ri.overlayIndex].visible = visible;
+        return true;
+    }
+
+    return false;
+}
+
+bool PsdAssembly::isItemVisible(const std::string& name) const {
+    auto it = renderRegistry.find(name);
+    if (it == renderRegistry.end()) {
+        return false;
+    }
+
+    const RenderItem& ri = it->second;
+    if (!ri.part) {
+        return false;
+    }
+
+    if (ri.kind == RenderItemKind::Part) {
+        return ri.part->visible;
+    }
+
+    if (ri.kind == RenderItemKind::SoftOverlay) {
+        if (ri.part->kind != PartKind::Soft) {
+            return false;
+        }
+
+        if (ri.overlayIndex < 0 ||
+            ri.overlayIndex >= static_cast<int>(ri.part->overlays.size())) {
+            return false;
+        }
+
+        return ri.part->overlays[ri.overlayIndex].visible;
+    }
+
+    return false;
+}
+
+void PsdAssembly::setOnlyVisible(
+    const std::vector<std::string>& namesToHideShow,
+    const std::string& visibleName
+) {
+    for (const std::string& name : namesToHideShow) {
+        setItemVisible(name, name == visibleName);
+    }
 }
 
 bool PsdAssembler::buildScene(
@@ -561,6 +640,10 @@ bool PsdAssembler::buildScene(
             part.render.tex = renderer.uploadTextureRGBA(layer.rgba.data(), layer.width, layer.height);
             part.render.halfW = part.rigid.halfWidthWorld;
             part.render.halfH = part.rigid.halfHeightWorld;
+
+            const bool is_eye = isEyeLayerName(part.name);
+            part.emissive = is_eye;
+            part.unlit = false;
 
             const auto& ob = part.rigid.opaqueBounds;
             part.render.u0 = float(ob.minx) / float(layer.width);
@@ -648,6 +731,10 @@ bool PsdAssembler::buildScene(
             part.render.texH = layer.height;
             part.render.tex = renderer.uploadTextureRGBA(layer.rgba.data(), layer.width, layer.height);
 
+            const bool is_eye = isEyeLayerName(part.name);
+            part.emissive = is_eye;
+            part.unlit = false;
+
             std::string softRenderError;
             if (!renderer.initializeSoftRenderMesh(part, softRenderError)) {
                 error = "Failed to initialize soft render mesh for " + layer.name + ": " + softRenderError;
@@ -691,6 +778,9 @@ bool PsdAssembler::buildScene(
             SoftOverlay ov;
             ov.name = ovLayer->name;
             ov.tex = renderer.uploadTextureRGBA(ovLayer->rgba.data(), ovLayer->width, ovLayer->height);
+            const bool is_eye = isEyeLayerName(ov.name);
+            ov.emissive = is_eye;
+            ov.unlit = is_eye;
             basePart->overlays.push_back(std::move(ov));
         }
     }

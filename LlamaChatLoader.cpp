@@ -37,10 +37,27 @@ void LlamaChatLoader::start(
         setStatus("Allocating chat instance");
 
         auto chat = std::make_unique<LlamaChat>();
+        chat->setCancellation(cancellation_);
+
+        if (cancellation_ && cancellation_->stop_requested.load()) {
+            state_ = State::Idle;
+            return;
+        }
 
         setStatus("Loading model");
 
         const bool ok = chat->initialize(model_path, system_prompt, options);
+
+        if (cancellation_ && cancellation_->stop_requested.load()) {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                status_ = "Model load cancelled.";
+                error_message_.clear();
+            }
+            chat_.reset();
+            state_ = State::Idle;
+            return;
+        }
 
         if (!ok) {
             {
@@ -107,4 +124,14 @@ LlamaChat* LlamaChatLoader::getChat() {
         return nullptr;
     }
     return chat_.get();
+}
+
+void LlamaChatLoader::setCancellation(RuntimeCancellation* cancellation) {
+    cancellation_ = cancellation;
+}
+
+void LlamaChatLoader::requestStop() {
+    if (cancellation_) {
+        cancellation_->stop_requested.store(true);
+    }
 }

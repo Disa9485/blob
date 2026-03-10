@@ -17,64 +17,63 @@ namespace {
             out_value = it->get<T>();
         }
     }
+
+    void replaceAllInPlace(std::string& text, const std::string& from, const std::string& to) {
+        if (from.empty()) {
+            return;
+        }
+
+        std::size_t pos = 0;
+        while ((pos = text.find(from, pos)) != std::string::npos) {
+            text.replace(pos, from.size(), to);
+            pos += to.size();
+        }
+    }
+
+    std::string expandPromptTags(
+        const std::vector<std::string>& parts,
+        const std::string& llm_name,
+        const std::string& user_name)
+    {
+        std::ostringstream out;
+
+        for (const std::string& part : parts) {
+            if (part.empty()) {
+                continue;
+            }
+
+            std::string expanded = part;
+            replaceAllInPlace(expanded, "<llm_name>", llm_name);
+            replaceAllInPlace(expanded, "<user_name>", user_name);
+            out << expanded;
+        }
+
+        return out.str();
+    }
 }
 
 std::string AppConfig::buildStaticSystemPrompt() const {
-    std::ostringstream out;
-
-    for (const std::string& part : static_system_prompt) {
-        if (!part.empty()) {
-            out << part;
-        }
-    }
-
-    return out.str();
+    return expandPromptTags(static_system_prompt, llm_name, user_name);
 }
 
 std::string AppConfig::buildDynamicSystemPrompt() const {
-    std::ostringstream out;
-
-    for (const std::string& part : dynamic_system_prompt) {
-        if (!part.empty()) {
-            out << part;
-        }
-    }
-
-    return out.str();
+    return expandPromptTags(dynamic_system_prompt, llm_name, user_name);
 }
 
 std::string AppConfig::llmName() const {
-    if (static_system_prompt.size() > kSystemPromptNameIndex &&
-        !static_system_prompt[kSystemPromptNameIndex].empty()) {
-        return static_system_prompt[kSystemPromptNameIndex];
-    }
-
-    return "Assistant";
+    return llm_name.empty() ? "Assistant" : llm_name;
 }
 
 void AppConfig::setLlmName(const std::string& name) {
-    if (static_system_prompt.size() <= kSystemPromptNameIndex) {
-        static_system_prompt.resize(kSystemPromptNameIndex + 1);
-    }
-
-    static_system_prompt[kSystemPromptNameIndex] = name;
+    llm_name = name;
 }
 
 std::string AppConfig::userName() const {
-    if (static_system_prompt.size() > kSystemPromptUserNameIndex &&
-        !static_system_prompt[kSystemPromptUserNameIndex].empty()) {
-        return static_system_prompt[kSystemPromptUserNameIndex];
-    }
-
-    return "Creator";
+    return user_name.empty() ? "Creator" : user_name;
 }
 
 void AppConfig::setUserName(const std::string& name) {
-    if (static_system_prompt.size() <= kSystemPromptUserNameIndex) {
-        static_system_prompt.resize(kSystemPromptUserNameIndex + 1);
-    }
-
-    static_system_prompt[kSystemPromptUserNameIndex] = name;
+    user_name = name;
 }
 
 namespace {
@@ -89,7 +88,8 @@ namespace {
                 { "glsl_version", config.window.glsl_version },
                 { "vsync", config.window.vsync },
                 { "fullscreen", config.window.fullscreen },
-                { "anti_aliasing_samples", config.window.anti_aliasing_samples }
+                { "anti_aliasing_samples", config.window.anti_aliasing_samples },
+                { "debug_mode", config.window.debug_mode }
             }},
             { "lighting", {
                 { "enabled", config.lighting.enabled },
@@ -106,6 +106,8 @@ namespace {
                 { "vignette_strength", config.lighting.vignette_strength }
             }},
             { "llm", {
+                { "llm_name", config.llm_name },
+                { "user_name", config.user_name },
                 { "static_system_prompt", config.static_system_prompt },
                 { "dynamic_system_prompt", config.dynamic_system_prompt },
                 { "show_system_prompt", config.llm_options.show_system_prompt },
@@ -193,6 +195,7 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
             readIfPresent(w, "vsync", out_config.window.vsync);
             readIfPresent(w, "fullscreen", out_config.window.fullscreen);
             readIfPresent(w, "anti_aliasing_samples", out_config.window.anti_aliasing_samples);
+            readIfPresent(w, "debug_mode", out_config.window.debug_mode);
         }
 
         if (auto it = j.find("lighting"); it != j.end() && it->is_object()) {
@@ -213,6 +216,9 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
 
         if (auto it = j.find("llm"); it != j.end() && it->is_object()) {
             const json& l = *it;
+
+            readIfPresent(l, "llm_name", out_config.llm_name);
+            readIfPresent(l, "user_name", out_config.user_name);
 
             if (auto sp = l.find("static_system_prompt"); sp != l.end() && sp->is_array()) {
                 out_config.static_system_prompt = sp->get<std::vector<std::string>>();
@@ -321,13 +327,13 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
         return false;
     }
 
-    if (out_config.llmName().empty()) {
-        out_error = "llm.static_system_prompt[1] must not be empty.";
+    if (out_config.llm_name.empty()) {
+        out_error = "llm.llm_name must not be empty.";
         return false;
     }
 
-    if (out_config.userName().empty()) {
-        out_error = "llm.static_system_prompt[6] must not be empty.";
+    if (out_config.user_name.empty()) {
+        out_error = "llm.user_name must not be empty.";
         return false;
     }
 

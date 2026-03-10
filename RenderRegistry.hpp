@@ -10,7 +10,7 @@
 namespace physics {
 
 void buildRenderRegistry(
-    const std::vector<RenderPart>& parts,
+    std::vector<RenderPart>& parts,
     std::unordered_map<std::string, RenderItem>& out
 );
 

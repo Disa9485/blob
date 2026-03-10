@@ -167,6 +167,8 @@ namespace {
         const std::string& touch_summary)
     {
         std::ostringstream out;
+        const bool has_memories = !retrieved_memories.empty();
+        const bool has_touch = !touch_summary.empty();
 
         if (!dynamic_base_prompt.empty()) {
             out << dynamic_base_prompt;
@@ -174,23 +176,42 @@ namespace {
 
         out << "\n\nCurrent datetime: " << current_display_time;
 
-        if (!retrieved_memories.empty()) {
-            out << "\n\nYour potential relevant memories:\n" << retrieved_memories;
+        if (has_memories) {
+            out << "\n\nRelevant memories:\n" << retrieved_memories;
         }
 
-        if (!touch_summary.empty()) {
+        if (has_touch) {
             out << "\n\n" << touch_summary;
         }
 
-        if (!retrieved_memories.empty() && touch_summary.empty()) {
-            out << "\nYou should mention these memories to them.";
-        } else if (retrieved_memories.empty() && !touch_summary.empty()) {
-            out << "\nYou should mention how they touched you.";
-        } else if (!retrieved_memories.empty() && !touch_summary.empty()) {
-            out << "\nYou should mention relevant memories and how they touched you.";
+        if (has_memories && has_touch) {
+            out << "\n\nYou may reference the relevant memories."
+                << "\nYou should also react to the touches.";
+        }
+        else if (has_memories) {
+            out << "\n\nYou may reference the relevant memories.";
+        }
+        else if (has_touch) {
+            out << "\n\nYou should also react to the touches.";
         }
 
         return out.str();
+    }
+
+    bool isOnlyDotsAndWhitespace(const std::string& s) {
+        bool saw_dot = false;
+
+        for (char c : s) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                continue;
+            }
+            if (c != '.') {
+                return false;
+            }
+            saw_dot = true;
+        }
+
+        return saw_dot;
     }
 }
 
@@ -288,6 +309,8 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
         worker_.join();
     }
 
+    stop_requested_.store(false);
+
     const std::string user_display_ts = formatTimestampNow();
     const std::string user_iso_ts = formatTimestampIso8601Now();
     const std::string assistant_display_ts = formatTimestampNow();
@@ -351,7 +374,7 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
         );
     }
 
-    generating_ = true;
+        generating_ = true;
     const bool ingest_response_memory = options.ingest_response_memory;
     worker_ = std::thread([this, user_text, augmented_system_prompt, assistant_message_index, ingest_response_memory]() {
         SentenceDetector detector;
@@ -360,6 +383,10 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
             user_text,
             augmented_system_prompt,
             [this, &detector](const std::string& piece) {
+                if (stop_requested_.load()) {
+                    return false;
+                }
+
                 detector.pushToken(piece);
 
                 while (detector.hasSegment()) {
@@ -371,15 +398,17 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
                     }
                 }
 
-                return true;
+                return !stop_requested_.load();
             }
         );
 
-        for (SentenceDetector::Segment& seg : detector.flushAll()) {
-            if (seg.type == SentenceDetector::SegmentType::Dialogue) {
-                appendAssistantDialogue(seg.text);
-            } else if (seg.type == SentenceDetector::SegmentType::Action) {
-                appendAssistantAction(seg.text);
+        if (!stop_requested_.load()) {
+            for (SentenceDetector::Segment& seg : detector.flushAll()) {
+                if (seg.type == SentenceDetector::SegmentType::Dialogue) {
+                    appendAssistantDialogue(seg.text);
+                } else if (seg.type == SentenceDetector::SegmentType::Action) {
+                    appendAssistantAction(seg.text);
+                }
             }
         }
 
@@ -388,7 +417,8 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!ok) {
+
+            if (!ok && !stop_requested_.load()) {
                 if (!messages_.empty()) {
                     if (!messages_.back().text.empty()) {
                         messages_.back().text += "\n";
@@ -399,13 +429,25 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
                 }
             }
 
+            if (stop_requested_.load()) {
+                if (!messages_.empty() && messages_.back().role == "assistant") {
+                    // Optional: mark it visibly as interrupted.
+                    if (!messages_.back().text.empty()) {
+                        messages_.back().text += " ";
+                    }
+                    messages_.back().text += "[interrupted]";
+                    scroll_history_to_bottom_ = true;
+                }
+            }
+
             if (!messages_.empty() && messages_.back().role == "assistant") {
                 assistant_text = messages_.back().text;
                 assistant_iso_ts = messages_.back().timestamp_iso8601;
             }
         }
 
-        if (ok && memory_ && memory_->isEnabled() && ingest_response_memory && !assistant_text.empty()) {
+        if (ok && !stop_requested_.load() &&
+            memory_ && memory_->isEnabled() && ingest_response_memory && !assistant_text.empty()) {
             std::string memory_error;
             memory_->ingestMessage(
                 session_id_,
@@ -418,11 +460,17 @@ void ChatUI::startGeneration(const std::string& user_text, const GenerationOptio
         }
 
         generating_ = false;
+        stop_requested_.store(false);
     });
 }
 
 void ChatUI::appendAssistantDialogue(const std::string& sentence) {
     if (sentence.empty()) {
+        return;
+    }
+
+    // Never speak punctuation-only ellipsis fragments by themselves.
+    if (isOnlyDotsAndWhitespace(sentence)) {
         return;
     }
 
@@ -690,7 +738,7 @@ void ChatUI::drawDialogueBubbles() {
         return;
     }
 
-    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
 
     const ImVec2 anchor(
         viewport->WorkPos.x + viewport->WorkSize.x * speaker_anchor_normalized_.x,
@@ -811,4 +859,15 @@ void ChatUI::draw() {
     drawDialogueBubbles();
     drawInputBar();
     drawHistoryPanel();
+}
+
+void ChatUI::setCancellation(RuntimeCancellation* cancellation) {
+    cancellation_ = cancellation;
+}
+
+void ChatUI::requestStopGeneration() {
+    stop_requested_.store(true);
+    if (cancellation_) {
+        cancellation_->stop_requested.store(true);
+    }
 }

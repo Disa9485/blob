@@ -41,6 +41,9 @@ bool GameRenderer::initialize(std::string& error) {
         uniform sampler2D uTex;
         uniform vec2 uScreen;
 
+        uniform int uUnlit;
+        uniform int uEmissive;
+
         uniform int uLightingEnabled;
         uniform float uAmbientIntensity;
         uniform float uAmbientWarmth;
@@ -60,7 +63,7 @@ bool GameRenderer::initialize(std::string& error) {
 
             vec3 color = tex.rgb;
 
-            if (uLightingEnabled == 0) {
+            if (uLightingEnabled == 0 || uUnlit == 1) {
                 FragColor = tex;
                 return;
             }
@@ -88,6 +91,11 @@ bool GameRenderer::initialize(std::string& error) {
             vec3 lit = color * (ambient + keyLight);
             lit *= vignetteFactor;
 
+            if (uEmissive == 1) {
+                lit = max(lit, color);
+                lit = min(lit + color * 0.35, vec3(1.0));
+            }
+
             FragColor = vec4(lit, tex.a);
         }
     )GLSL";
@@ -100,6 +108,8 @@ bool GameRenderer::initialize(std::string& error) {
     uScreenLoc_ = glGetUniformLocation(program_, "uScreen");
     uTexLoc_ = glGetUniformLocation(program_, "uTex");
 
+    uUnlitLoc_ = glGetUniformLocation(program_, "uUnlit");
+    uEmissiveLoc_ = glGetUniformLocation(program_, "uEmissive");
     uLightingEnabledLoc_ = glGetUniformLocation(program_, "uLightingEnabled");
     uAmbientIntensityLoc_ = glGetUniformLocation(program_, "uAmbientIntensity");
     uAmbientWarmthLoc_ = glGetUniformLocation(program_, "uAmbientWarmth");
@@ -162,6 +172,8 @@ void GameRenderer::shutdown() {
 
     uScreenLoc_ = -1;
     uTexLoc_ = -1;
+    uUnlitLoc_ = -1;
+    uEmissiveLoc_ = -1;
     framebufferWidth_ = 0;
     framebufferHeight_ = 0;
 }
@@ -255,6 +267,8 @@ void GameRenderer::beginFrame(int framebufferWidth, int framebufferHeight) {
     glUniform2f(uScreenLoc_, static_cast<float>(framebufferWidth_), static_cast<float>(framebufferHeight_));
     glActiveTexture(GL_TEXTURE0);
 
+    glUniform1i(uUnlitLoc_, 0);
+    glUniform1i(uEmissiveLoc_, 0);
     glUniform1i(uLightingEnabledLoc_, lighting_.enabled ? 1 : 0);
     glUniform1f(uAmbientIntensityLoc_, lighting_.ambient_intensity);
     glUniform1f(uAmbientWarmthLoc_, lighting_.ambient_warmth);
@@ -450,9 +464,14 @@ void GameRenderer::renderParts(const std::vector<physics::RenderItem>& items) {
         }
 
         const physics::RenderPart& part = *it.part;
-        glActiveTexture(GL_TEXTURE0);
 
         if (it.kind == physics::RenderItemKind::Part) {
+            if (!part.visible) {
+                continue;
+            }
+
+            glActiveTexture(GL_TEXTURE0);
+
             if (part.kind == physics::PartKind::Rigid) {
                 if (!part.rigid.body || !part.render.tex) {
                     continue;
@@ -475,6 +494,8 @@ void GameRenderer::renderParts(const std::vector<physics::RenderItem>& items) {
                     part.render.v1
                 );
 
+                glUniform1i(uUnlitLoc_, part.unlit ? 1 : 0);
+                glUniform1i(uEmissiveLoc_, part.emissive ? 1 : 0);
                 glBindVertexArray(quadVao_);
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
             } else {
@@ -482,6 +503,8 @@ void GameRenderer::renderParts(const std::vector<physics::RenderItem>& items) {
                     continue;
                 }
 
+                glUniform1i(uUnlitLoc_, part.unlit ? 1 : 0);
+                glUniform1i(uEmissiveLoc_, part.emissive ? 1 : 0);
                 glBindVertexArray(part.softRender.vao);
                 glBindTexture(GL_TEXTURE_2D, part.render.tex);
                 glDrawElements(
@@ -501,12 +524,19 @@ void GameRenderer::renderParts(const std::vector<physics::RenderItem>& items) {
                 continue;
             }
 
-            if (!part.softRender.vao || !part.overlays[oi].tex) {
+            const auto& overlay = part.overlays[oi];
+            if (!overlay.visible) {
                 continue;
             }
 
+            if (!part.softRender.vao || !overlay.tex) {
+                continue;
+            }
+
+            glUniform1i(uUnlitLoc_, overlay.unlit ? 1 : 0);
+            glUniform1i(uEmissiveLoc_, overlay.emissive ? 1 : 0);
             glBindVertexArray(part.softRender.vao);
-            glBindTexture(GL_TEXTURE_2D, part.overlays[oi].tex);
+            glBindTexture(GL_TEXTURE_2D, overlay.tex);
             glDrawElements(
                 GL_TRIANGLES,
                 static_cast<GLsizei>(part.softRender.indexCount),

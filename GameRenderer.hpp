@@ -61,6 +61,8 @@ private:
 
     LightingConfig lighting_{};
 
+    GLint uUnlitLoc_ = -1;
+    GLint uEmissiveLoc_ = -1;
     GLint uLightingEnabledLoc_ = -1;
     GLint uAmbientIntensityLoc_ = -1;
     GLint uAmbientWarmthLoc_ = -1;

@@ -64,6 +64,8 @@ set_target_properties(onnxruntime PROPERTIES
 
 add_executable(blob
     main.cpp
+    AppRuntime.cpp
+    Utilities.cpp
     AppConfig.cpp
     SaveManager.cpp
     SaveLauncher.cpp
@@ -90,6 +92,7 @@ add_executable(blob
     PsdAssembler.cpp
     SoftBodyInteractor.cpp
     RoomManager.cpp
+    EyeController.cpp
 )
 
 target_include_directories(blob PRIVATE

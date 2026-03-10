@@ -2,6 +2,7 @@
 #pragma once
 
 #include "LlamaChat.hpp"
+#include "RuntimeCancellation.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -42,6 +43,9 @@ public:
 
     LlamaChat* getChat();
 
+    void setCancellation(RuntimeCancellation* cancellation);
+    void requestStop();
+
 private:
     void setStatus(const std::string& text);
 
@@ -54,4 +58,6 @@ private:
     std::string status_ = "Idle";
     std::string error_message_;
     std::chrono::steady_clock::time_point load_started_at_{};
+
+    RuntimeCancellation* cancellation_ = nullptr;
 };
