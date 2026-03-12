@@ -119,6 +119,19 @@ target_link_libraries(blob PRIVATE
     onnxruntime
 )
 
+add_custom_command(TARGET blob POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/piper/bin/piper.dll"
+        $<TARGET_FILE_DIR:blob>/piper.dll
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/piper/bin/onnxruntime.dll"
+        $<TARGET_FILE_DIR:blob>/onnxruntime.dll
+    COMMAND cmd /c
+        "robocopy \"${CMAKE_SOURCE_DIR}\\third_party\\espeak-ng-data\" \"$<TARGET_FILE_DIR:blob>\\third_party\\espeak-ng-data\" /E /XO /R:1 /W:1 /NFL /NDL /NJH /NJS /NP & if %ERRORLEVEL% LSS 8 exit /b 0 else exit /b %ERRORLEVEL%"
+    COMMAND cmd /c
+        "robocopy \"${CMAKE_SOURCE_DIR}\\assets\" \"$<TARGET_FILE_DIR:blob>\\assets\" /E /XO /R:1 /W:1 /NFL /NDL /NJH /NJS /NP & if %ERRORLEVEL% LSS 8 exit /b 0 else exit /b %ERRORLEVEL%"
+)
+
 # keep your game on C++20
 set_property(TARGET blob PROPERTY CXX_STANDARD 20)
 

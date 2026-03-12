@@ -630,13 +630,27 @@ void SaveLauncher::drawSettingsEditor() {
             "Maximum context window size. Larger values let the model consider more prior text, but use more memory and can be slower."
         );
 
+        checkboxWithTooltip(
+            "Use GPU",
+            &config.llm_options.use_gpu,
+            "Enables Vulkan GPU acceleration for llama.cpp if available. Disable this to force true CPU-only inference."
+        );
+
+        if (!config.llm_options.use_gpu) {
+            ImGui::BeginDisabled();
+        }
+
         sliderIntWithTooltip(
             "n_gpu_layers",
             &config.llm_options.n_gpu_layers,
             0,
             200,
-            "How many model layers to offload to the GPU. Higher can be faster if your GPU has enough VRAM. Set to 0 for CPU-only."
+            "How many model layers to offload to the GPU when GPU usage is enabled. Higher can be faster if your GPU has enough VRAM."
         );
+
+        if (!config.llm_options.use_gpu) {
+            ImGui::EndDisabled();
+        }
 
         sliderIntWithTooltip(
             "n_predict",

@@ -410,6 +410,8 @@ bool AppRuntime::launchPendingSave() {
         }
     }
 
+    cancellation_.stop_requested.store(false);
+
     loader_ = std::make_unique<LlamaChatLoader>();
     loader_->setCancellation(&cancellation_);
     loader_->start(

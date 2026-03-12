@@ -2,5 +2,7 @@ build/
 assets/
 third_party/
 vcpkg_installed/
+saves/
 dnu*
 TODO.md
+imgui.ini

@@ -14,7 +14,7 @@ int main() {
     int exit_code = 0;
 
     {
-        AppRuntime app("default_app_config.json", "saves");
+        AppRuntime app("assets/default_app_config.json", "saves");
 
         std::string error;
         if (!app.initialize(error)) {

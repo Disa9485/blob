@@ -53,7 +53,7 @@ bool LlamaChat::initialize(
     backend_ = std::make_unique<BackendGuard>();
 
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = options.n_gpu_layers;
+    model_params.n_gpu_layers = options.use_gpu ? options.n_gpu_layers : 0;
     model_params.progress_callback = &LlamaChat::modelLoadProgressCallback;
     model_params.progress_callback_user_data = this;
 
@@ -234,11 +234,16 @@ bool LlamaChat::createContextAndSampler() {
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = options_.n_ctx;
-    ctx_params.n_batch = options_.n_ctx;
-    ctx_params.n_ubatch = options_.n_ctx;
+    ctx_params.n_batch  = std::min(options_.n_ctx, 512);
+    ctx_params.n_ubatch = std::min(options_.n_ctx, 512);
     ctx_params.no_perf = true;
     ctx_params.abort_callback = &LlamaChat::decodeAbortCallback;
     ctx_params.abort_callback_data = this;
+
+    if (!options_.use_gpu) {
+        ctx_params.offload_kqv = false;
+        ctx_params.op_offload = false;
+    }
 
     ctx_.reset(llama_init_from_model(model_.get(), ctx_params));
     if (!ctx_) {

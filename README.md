@@ -7,11 +7,23 @@
 - Also we implement chipmunk 2D physics engine and use PSD image layers to build and load 2D scenes with physics. PSD SDK is used to load PSD layers and Delaunator is used to automatically triangulate the bodies from the layers to seperate the translucent pixels.
 - The user can interact with parts of the scene which will tell the LLM it was interacted with, giving it a kind of physical body in a world space. A config file will determine how a part reacts under physics and we can build both soft bodies and rigid bodies.
 
-### To build, in blob/build/Release do:
-cmake --build .. --config Release && blob.exe
+### Fresh build:
+Make sure `CMakePresets.json` points to your local `vcpkg.cmake`.
+
+From the project root, build and run with:
+```bat
+cmake --preset default --fresh
+cmake --build --preset release
+.\build\Release\blob.exe
+```
+
+If dependencies are missing, run:
+where vcpkg
+<vcpkg-root>\vcpkg.exe install
 
 ### Requirements:
 - OpenGL
+- Vulkan
 - glfw3
 - glad
 - ImGui

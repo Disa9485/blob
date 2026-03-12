@@ -22,6 +22,7 @@ public:
         int n_ctx = 4096;
         int n_predict = 256;
         int n_threads = 8;
+        bool use_gpu = false;
         int n_gpu_layers = 0;
         int history_limit = 12;
         bool greedy = true;

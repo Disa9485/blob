@@ -114,6 +114,7 @@ namespace {
                 { "n_ctx", config.llm_options.n_ctx },
                 { "n_predict", config.llm_options.n_predict },
                 { "n_threads", config.llm_options.n_threads },
+                { "use_gpu", config.llm_options.use_gpu },
                 { "n_gpu_layers", config.llm_options.n_gpu_layers },
                 { "history_limit", config.llm_options.history_limit },
                 { "greedy", config.llm_options.greedy },
@@ -231,6 +232,7 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
             readIfPresent(l, "n_ctx", out_config.llm_options.n_ctx);
             readIfPresent(l, "n_predict", out_config.llm_options.n_predict);
             readIfPresent(l, "n_threads", out_config.llm_options.n_threads);
+            readIfPresent(l, "use_gpu", out_config.llm_options.use_gpu);
             readIfPresent(l, "n_gpu_layers", out_config.llm_options.n_gpu_layers);
             readIfPresent(l, "history_limit", out_config.llm_options.history_limit);
             readIfPresent(l, "greedy", out_config.llm_options.greedy);
