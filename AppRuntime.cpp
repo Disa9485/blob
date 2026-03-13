@@ -440,7 +440,7 @@ bool AppRuntime::launchPendingSave() {
 
     game_renderer_->setLightingConfig(active_config_.lighting);
 
-    current_scene_id_ = "robot_idle";
+    current_scene_id_ = "robot_missionary";
     if (!loadSceneById(current_scene_id_)) {
         std::cerr << "Failed to assemble PSD character.\n";
     }
@@ -589,8 +589,11 @@ void AppRuntime::updateGameRenderingAndSimulation(int display_w, int display_h) 
             float physics_ms = 0.0f;
             {
                 util::ScopedTimerMs timer(&physics_ms);
+
+                physics::PsdAssembler::updateJointAnimations(psd_assembly_, dt);
                 physics_scene_->step(dt);
             }
+            debug_frame_breakdown_.setPhysicsMs(physics_ms);
             debug_frame_breakdown_.setPhysicsMs(physics_ms);
 
             float autonomous_ms = 0.0f;

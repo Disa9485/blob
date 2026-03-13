@@ -273,6 +273,54 @@ static inline cpFloat degToRad(float deg) {
     return (cpFloat)(deg * 3.14159265358979323846 / 180.0);
 }
 
+static cpBool allowListBegin(cpArbiter* arb, cpSpace* space, cpDataPointer) {
+    cpShape* aShape = nullptr;
+    cpShape* bShape = nullptr;
+    cpArbiterGetShapes(arb, &aShape, &bShape);
+
+    auto* tagA = reinterpret_cast<ShapeTag*>(cpShapeGetUserData(aShape));
+    auto* tagB = reinterpret_cast<ShapeTag*>(cpShapeGetUserData(bShape));
+
+    if (!tagA || !tagB || tagA->partId == 0 || tagB->partId == 0) return cpTrue;
+    if (tagA->partId == tagB->partId) return cpFalse;
+
+    auto* rules = reinterpret_cast<CollisionRules*>(cpSpaceGetUserData(space));
+    if (!rules) return cpFalse;
+
+    const std::uint64_t key = pairKey(tagA->partId, tagB->partId);
+    return (rules->allowedPairs.find(key) != rules->allowedPairs.end()) ? cpTrue : cpFalse;
+}
+
+static bool isEyeLayerName(const std::string& name) {
+    return name.find("eye") != std::string::npos ||
+           name.find("Eye") != std::string::npos ||
+           name.find("eyes") != std::string::npos;
+}
+
+static inline float radToDeg(cpFloat rad) {
+    return static_cast<float>(rad * 180.0 / 3.14159265358979323846);
+}
+
+static inline float wrapDeg180(float deg) {
+    while (deg > 180.0f) deg -= 360.0f;
+    while (deg < -180.0f) deg += 360.0f;
+    return deg;
+}
+
+static inline float clampf(float v, float lo, float hi) {
+    return std::max(lo, std::min(v, hi));
+}
+
+static float getRelativeJointAngleDeg(cpBody* child, cpBody* parent, bool parentIsScene) {
+    const float childDeg = radToDeg(cpBodyGetAngle(child));
+    const float parentDeg = parentIsScene ? 0.0f : radToDeg(cpBodyGetAngle(parent));
+    return wrapDeg180(childDeg - parentDeg);
+}
+
+static cpVect getBodyPos(cpBody* b) {
+    return cpBodyGetPosition(b);
+}
+
 static JointPair connectPartsPivotLimited(
     cpSpace* space,
     std::unordered_map<std::string, RenderPart*>& partsByName,
@@ -310,26 +358,44 @@ static JointPair connectPartsPivotLimited(
         return out;
     }
 
+    const bool hasAnimation = !cfg.angleTargets.empty();
+    const bool hasTranslation = !cfg.translationTargets.empty();
+
     if (parentIsScene) {
         cpBody* staticBody = cpSpaceGetStaticBody(space);
 
-        // Lock child translation to a fixed world point.
-        out.pivot = cpPivotJointNew(
-            staticBody,
-            aBody,
-            pWorld
-        );
+        out.pivot = cpPivotJointNew(staticBody, aBody, pWorld);
         cpConstraintSetMaxForce(out.pivot, cfg.maxForcePivot);
         cpSpaceAddConstraint(space, out.pivot);
 
-        // Also constrain rotation against the scene.
+        if (hasTranslation) {
+
+            out.translation.enabled = true;
+
+            out.translation.body = aBody;
+            out.translation.staticBody = staticBody;
+            out.translation.pivot = out.pivot;
+
+            out.translation.baseWorld = pWorld;
+
+            out.translation.pivotOffsetLocal =
+                cpBodyWorldToLocal(aBody, pWorld);
+
+            for (const auto& t : cfg.translationTargets) {
+                out.translation.targets.push_back({
+                    t.target,
+                    t.moveDurationMs,
+                    t.holdDurationMs
+                });
+            }
+        }
+
         cpBody* aAngleBody = pickAngleBodyForJoint(a);
         if (aAngleBody) {
             cpFloat minRad = degToRad(cfg.minDeg);
             cpFloat maxRad = degToRad(cfg.maxDeg);
             if (minRad > maxRad) std::swap(minRad, maxRad);
 
-            // Interpret limits relative to the current world angle.
             const cpFloat baseAngle = cpBodyGetAngle(aAngleBody);
 
             out.limit = cpRotaryLimitJointNew(
@@ -341,18 +407,34 @@ static JointPair connectPartsPivotLimited(
             cpConstraintSetMaxForce(out.limit, cfg.maxForceLimit);
             cpSpaceAddConstraint(space, out.limit);
 
-            if (cfg.enableRotSpring && cfg.rotSpringK > 0.0f) {
+            if (hasAnimation) {
+                out.animation.enabled = true;
+                out.animation.parentIsScene = true;
+                out.animation.childAngleBody = aAngleBody;
+                out.animation.parentAngleBody = staticBody;
+                out.animation.minDeg = cfg.minDeg;
+                out.animation.maxDeg = cfg.maxDeg;
+                out.animation.sceneBaseAngleDeg = radToDeg(baseAngle);
+
+                for (const auto& t : cfg.angleTargets) {
+                    out.animation.targets.push_back({
+                        t.targetDeg,
+                        t.moveDurationMs,
+                        t.holdDurationMs
+                    });
+                }
+
+                out.animation.motor = cpSimpleMotorNew(staticBody, aAngleBody, 0.0);
+                cpConstraintSetMaxForce(out.animation.motor, cfg.motorMaxForce);
+                cpSpaceAddConstraint(space, out.animation.motor);
+            } else if (cfg.enableRotSpring && cfg.rotSpringK > 0.0f) {
                 const cpFloat restAngle =
                     std::isnan((double)cfg.restAngleRadOverride)
                         ? baseAngle
                         : (baseAngle + cfg.restAngleRadOverride);
 
                 out.rotSpring = cpDampedRotarySpringNew(
-                    staticBody,
-                    aAngleBody,
-                    restAngle,
-                    cfg.rotSpringK,
-                    cfg.rotSpringDamp
+                    staticBody, aAngleBody, restAngle, cfg.rotSpringK, cfg.rotSpringDamp
                 );
                 cpConstraintSetMaxForce(out.rotSpring, (cpFloat)1e10);
                 cpConstraintSetMaxBias(out.rotSpring, (cpFloat)1e6);
@@ -395,18 +477,33 @@ static JointPair connectPartsPivotLimited(
         cpConstraintSetMaxForce(out.limit, cfg.maxForceLimit);
         cpSpaceAddConstraint(space, out.limit);
 
-        if (cfg.enableRotSpring && cfg.rotSpringK > 0.0f) {
+        if (hasAnimation) {
+            out.animation.enabled = true;
+            out.animation.parentIsScene = false;
+            out.animation.childAngleBody = aAngleBody;
+            out.animation.parentAngleBody = bAngleBody;
+            out.animation.minDeg = cfg.minDeg;
+            out.animation.maxDeg = cfg.maxDeg;
+
+            for (const auto& t : cfg.angleTargets) {
+                out.animation.targets.push_back({
+                    t.targetDeg,
+                    t.moveDurationMs,
+                    t.holdDurationMs
+                });
+            }
+
+            out.animation.motor = cpSimpleMotorNew(aAngleBody, bAngleBody, 0.0);
+            cpConstraintSetMaxForce(out.animation.motor, cfg.motorMaxForce);
+            cpSpaceAddConstraint(space, out.animation.motor);
+        } else if (cfg.enableRotSpring && cfg.rotSpringK > 0.0f) {
             const cpFloat restAngle =
                 std::isnan((double)cfg.restAngleRadOverride)
                     ? cpBodyGetAngle(aAngleBody) - cpBodyGetAngle(bAngleBody)
                     : cfg.restAngleRadOverride;
 
             out.rotSpring = cpDampedRotarySpringNew(
-                aAngleBody,
-                bAngleBody,
-                restAngle,
-                cfg.rotSpringK,
-                cfg.rotSpringDamp
+                aAngleBody, bAngleBody, restAngle, cfg.rotSpringK, cfg.rotSpringDamp
             );
             cpConstraintSetMaxForce(out.rotSpring, (cpFloat)1e10);
             cpConstraintSetMaxBias(out.rotSpring, (cpFloat)1e6);
@@ -417,28 +514,21 @@ static JointPair connectPartsPivotLimited(
     return out;
 }
 
-static cpBool allowListBegin(cpArbiter* arb, cpSpace* space, cpDataPointer) {
-    cpShape* aShape = nullptr;
-    cpShape* bShape = nullptr;
-    cpArbiterGetShapes(arb, &aShape, &bShape);
-
-    auto* tagA = reinterpret_cast<ShapeTag*>(cpShapeGetUserData(aShape));
-    auto* tagB = reinterpret_cast<ShapeTag*>(cpShapeGetUserData(bShape));
-
-    if (!tagA || !tagB || tagA->partId == 0 || tagB->partId == 0) return cpTrue;
-    if (tagA->partId == tagB->partId) return cpFalse;
-
-    auto* rules = reinterpret_cast<CollisionRules*>(cpSpaceGetUserData(space));
-    if (!rules) return cpFalse;
-
-    const std::uint64_t key = pairKey(tagA->partId, tagB->partId);
-    return (rules->allowedPairs.find(key) != rules->allowedPairs.end()) ? cpTrue : cpFalse;
+static float smoothStepQuintic(float u) {
+    u = clampf(u, 0.0f, 1.0f);
+    const float u2 = u * u;
+    const float u3 = u2 * u;
+    const float u4 = u3 * u;
+    const float u5 = u4 * u;
+    return 6.0f * u5 - 15.0f * u4 + 10.0f * u3;
 }
 
-static bool isEyeLayerName(const std::string& name) {
-    return name.find("eye") != std::string::npos ||
-           name.find("Eye") != std::string::npos ||
-           name.find("eyes") != std::string::npos;
+static float smoothStepQuinticDeriv(float u) {
+    u = clampf(u, 0.0f, 1.0f);
+    const float u2 = u * u;
+    const float u3 = u2 * u;
+    const float u4 = u3 * u;
+    return 30.0f * u4 - 60.0f * u3 + 30.0f * u2;
 }
 
 } // namespace
@@ -557,6 +647,178 @@ void PsdAssembly::setOnlyVisible(
     }
 }
 
+void PsdAssembler::updateJointAnimations(PsdAssembly& assembly, double dt) {
+    const float dtf = static_cast<float>(dt);
+    if (dtf <= 0.0f) {
+        return;
+    }
+
+    for (JointPair& jp : assembly.joints) {
+        auto& anim = jp.animation;
+        if (!anim.enabled || !anim.motor || anim.targets.empty() ||
+            !anim.childAngleBody || !anim.parentAngleBody) {
+            continue;
+        }
+
+        if (anim.currentIndex >= anim.targets.size()) {
+            anim.currentIndex = 0;
+        }
+
+        auto getCurrentDeg = [&]() -> float {
+            if (anim.parentIsScene) {
+                return radToDeg(cpBodyGetAngle(anim.childAngleBody));
+            }
+
+            return getRelativeJointAngleDeg(
+                anim.childAngleBody,
+                anim.parentAngleBody,
+                false
+            );
+        };
+
+        const auto& target = anim.targets[anim.currentIndex];
+
+        if (anim.phase == JointAnimationRuntime::Phase::Holding) {
+            cpSimpleMotorSetRate(anim.motor, 0.0);
+            anim.phaseElapsedMs += dtf * 1000.0f;
+
+            if (anim.phaseElapsedMs >= target.holdDurationMs) {
+                anim.currentIndex = (anim.currentIndex + 1) % anim.targets.size();
+                anim.phase = JointAnimationRuntime::Phase::Moving;
+                anim.phaseElapsedMs = 0.0f;
+
+                const auto& nextTarget = anim.targets[anim.currentIndex];
+                anim.moveStartDeg = getCurrentDeg();
+
+                if (anim.parentIsScene) {
+                    anim.moveTargetDeg = anim.sceneBaseAngleDeg + nextTarget.targetDeg;
+                } else {
+                    anim.moveTargetDeg = clampf(nextTarget.targetDeg, anim.minDeg, anim.maxDeg);
+                }
+            }
+
+            continue;
+        }
+
+        // If we are entering Moving for the first time, initialize the segment.
+        if (anim.phaseElapsedMs <= 0.0f) {
+            anim.moveStartDeg = getCurrentDeg();
+
+            if (anim.parentIsScene) {
+                anim.moveTargetDeg = anim.sceneBaseAngleDeg + target.targetDeg;
+            } else {
+                anim.moveTargetDeg = clampf(target.targetDeg, anim.minDeg, anim.maxDeg);
+            }
+        }
+
+        const float durationMs = std::max(target.moveDurationMs, 0.0f);
+
+        if (durationMs <= 0.0f) {
+            // Instant move segment; go directly into hold.
+            cpSimpleMotorSetRate(anim.motor, 0.0);
+            anim.phase = JointAnimationRuntime::Phase::Holding;
+            anim.phaseElapsedMs = 0.0f;
+            continue;
+        }
+
+        anim.phaseElapsedMs += dtf * 1000.0f;
+
+        const float u = clampf(anim.phaseElapsedMs / durationMs, 0.0f, 1.0f);
+        const float dsdu = smoothStepQuinticDeriv(u);
+
+        const float deltaDeg = anim.moveTargetDeg - anim.moveStartDeg;
+        const float durationSec = durationMs * 0.001f;
+
+        const float commandedVelDegPerSec =
+            (durationSec > 0.0f) ? (deltaDeg * dsdu / durationSec) : 0.0f;
+
+        cpSimpleMotorSetRate(anim.motor, degToRad(commandedVelDegPerSec));
+
+        if (u >= 1.0f) {
+            cpSimpleMotorSetRate(anim.motor, 0.0);
+            anim.phase = JointAnimationRuntime::Phase::Holding;
+            anim.phaseElapsedMs = 0.0f;
+        }
+    }
+
+    for (JointPair& jp : assembly.joints) {
+
+        auto& anim = jp.translation;
+        if (!anim.enabled || !anim.pivot || anim.targets.empty())
+            continue;
+
+        if (anim.currentIndex >= anim.targets.size())
+            anim.currentIndex = 0;
+
+        const auto& target = anim.targets[anim.currentIndex];
+
+        if (anim.phase == JointTranslationRuntime::Phase::Holding) {
+
+            anim.phaseElapsedMs += dtf * 1000.0f;
+
+            if (anim.phaseElapsedMs >= target.holdDurationMs) {
+
+                anim.currentIndex = (anim.currentIndex + 1) % anim.targets.size();
+                anim.phase = JointTranslationRuntime::Phase::Moving;
+                anim.phaseElapsedMs = 0.0f;
+
+                const auto& next = anim.targets[anim.currentIndex];
+
+                anim.moveStart = anim.baseWorld;
+
+                anim.moveTarget = cpvadd(
+                    anim.baseWorld,
+                    cpv(next.targetPx.x * assembly.sceneScale,
+                        next.targetPx.y * assembly.sceneScale)
+                );
+            }
+
+            continue;
+        }
+
+        if (anim.phaseElapsedMs <= 0.0f) {
+
+            anim.moveStart = anim.baseWorld;
+
+            anim.moveTarget = cpvadd(
+                anim.baseWorld,
+                cpv(target.targetPx.x * assembly.sceneScale,
+                    target.targetPx.y * assembly.sceneScale)
+            );
+        }
+
+        const float durationMs = std::max(target.moveDurationMs, 0.0f);
+
+        if (durationMs <= 0.0f) {
+            anim.phase = JointTranslationRuntime::Phase::Holding;
+            anim.phaseElapsedMs = 0.0f;
+            continue;
+        }
+
+        anim.phaseElapsedMs += dtf * 1000.0f;
+
+        const float u = clampf(anim.phaseElapsedMs / durationMs, 0.0f, 1.0f);
+
+        const float s = smoothStepQuintic(u);
+
+        const cpVect delta = cpvsub(anim.moveTarget, anim.moveStart);
+
+        const cpVect newAnchor =
+            cpvadd(anim.moveStart, cpvmult(delta, s));
+
+        // Move pivot anchor
+        cpPivotJointSetAnchorA(anim.pivot, newAnchor);
+
+        if (u >= 1.0f) {
+
+            anim.baseWorld = anim.moveTarget;
+
+            anim.phase = JointTranslationRuntime::Phase::Holding;
+            anim.phaseElapsedMs = 0.0f;
+        }
+    }
+}
+
 bool PsdAssembler::buildScene(
     cpSpace* space,
     render::GameRenderer& renderer,
@@ -590,6 +852,7 @@ bool PsdAssembler::buildScene(
     const Vec2 canvasCenter((float)psd.canvasWidth * 0.5f, (float)psd.canvasHeight * 0.5f);
     const Vec2 sceneWorldPos = resolveSceneWorldPosition(config.scene, sceneWidth, sceneHeight);
     const float sceneScale = config.scene.scale;
+    out.sceneScale = sceneScale;
 
     std::unordered_map<std::string, std::vector<const LayerImageRGBA*>> overlaysByBase;
     for (auto& kv : psd.layersByName) {
@@ -875,6 +1138,12 @@ void PsdAssembler::destroyAssembly(
     PsdAssembly& assembly
 ) {
     for (JointPair& jp : assembly.joints) {
+        if (jp.animation.motor) {
+            cpSpaceRemoveConstraint(space, jp.animation.motor);
+            cpConstraintFree(jp.animation.motor);
+            jp.animation.motor = nullptr;
+        }
+
         if (jp.pivot)      { cpSpaceRemoveConstraint(space, jp.pivot);      cpConstraintFree(jp.pivot);      jp.pivot = nullptr; }
         if (jp.limit)      { cpSpaceRemoveConstraint(space, jp.limit);      cpConstraintFree(jp.limit);      jp.limit = nullptr; }
         if (jp.framePivot) { cpSpaceRemoveConstraint(space, jp.framePivot); cpConstraintFree(jp.framePivot); jp.framePivot = nullptr; }

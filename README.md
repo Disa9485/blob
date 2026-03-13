@@ -22,18 +22,27 @@ where vcpkg
 <vcpkg-root>\vcpkg.exe install
 
 ### Requirements:
+#### UI
 - OpenGL
-- Vulkan
 - glfw3
 - glad
 - ImGui
+
+#### Physics
 - Chipmunk
 - Psd SDK
 - delaunator
-- sqlite3
-- nlohmann json
+
+#### TTS
 - OpenAL
 - piper
 - onnxruntime
+
+#### RAG
 - llama.cpp
+- Vulkan
 - faiss
+- sqlite3
+
+#### Other
+- nlohmann json

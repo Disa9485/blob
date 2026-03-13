@@ -62,6 +62,18 @@ struct SceneCollisionRulesConfig {
     std::vector<std::pair<std::string, std::string>> allowPairs;
 };
 
+struct SceneJointAngleTargetConfig {
+    float targetDeg = 0.0f;
+    float moveDurationMs = 0.0f;
+    float holdDurationMs = 0.0f;
+};
+
+struct SceneJointTranslationTargetConfig {
+    Vec2 target = {0.0f, 0.0f};
+    float moveDurationMs = 0.0f;
+    float holdDurationMs = 0.0f;
+};
+
 struct SceneJointConfig {
     std::string child;
     std::string parent;
@@ -76,6 +88,10 @@ struct SceneJointConfig {
     cpFloat rotSpringK = (cpFloat)0.0f;
     cpFloat rotSpringDamp = (cpFloat)0.0f;
     cpFloat restAngleRadOverride = std::numeric_limits<cpFloat>::quiet_NaN();
+
+    std::vector<SceneJointAngleTargetConfig> angleTargets;
+    std::vector<SceneJointTranslationTargetConfig> translationTargets;
+    cpFloat motorMaxForce = (cpFloat)1e9; // torque cap for animation motor
 };
 
 struct SceneConfig {

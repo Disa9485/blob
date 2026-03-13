@@ -272,6 +272,56 @@ bool SceneConfig::loadFromFile(
                     joint.restAngleRadOverride = jj.at("rest_angle_rad_override").get<cpFloat>();
                 }
 
+                joint.motorMaxForce = jj.value("motor_max_force", joint.motorMaxForce);
+
+                if (jj.contains("angle_target")) {
+                    const json& at = jj.at("angle_target");
+                    if (!at.is_array()) {
+                        error = "joints[].angle_target must be an array.";
+                        return false;
+                    }
+
+                    for (std::size_t k = 0; k < at.size(); ++k) {
+                        const json& item = at.at(k);
+                        if (!item.is_object()) {
+                            error = "joints[].angle_target[] entries must be objects.";
+                            return false;
+                        }
+
+                        SceneJointAngleTargetConfig t;
+                        t.targetDeg = item.value("target", 0.0f);
+                        t.moveDurationMs = item.value("move_duration", 0.0f);
+                        t.holdDurationMs = item.value("hold_duration", 0.0f);
+
+                        if (t.moveDurationMs < 0.0f || t.holdDurationMs < 0.0f) {
+                            error = "joints[].angle_target[] durations must be >= 0.";
+                            return false;
+                        }
+
+                        joint.angleTargets.push_back(t);
+                    }
+                }
+
+                if (jj.contains("translation_target")) {
+                    const json& at = jj.at("translation_target");
+                    if (!at.is_array()) {
+                        error = "joints[].translation_target must be an array.";
+                        return false;
+                    }
+
+                    for (const auto& item : at) {
+                        SceneJointTranslationTargetConfig t;
+
+                        if (!readVec2(item.at("target"), t.target, "translation_target.target", error))
+                            return false;
+
+                        t.moveDurationMs = item.value("move_duration", 0.0f);
+                        t.holdDurationMs = item.value("hold_duration", 0.0f);
+
+                        joint.translationTargets.push_back(t);
+                    }
+                }
+
                 out.joints.push_back(joint);
             }
         }
