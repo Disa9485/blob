@@ -151,6 +151,10 @@ namespace {
                 { "noise_w_scale", config.tts.noise_w_scale },
                 { "warp", {
                     { "enabled", config.tts.warp.enabled },
+                    { "pitch_shift_enabled", config.tts.warp.pitch_shift_enabled },
+                    { "pitch_scale", config.tts.warp.pitch_scale },
+                    { "low_pass_enabled", config.tts.warp.low_pass_enabled },
+                    { "low_pass_cutoff_hz", config.tts.warp.low_pass_cutoff_hz },
                     { "lower_sentence_end_enabled", config.tts.warp.lower_sentence_end_enabled },
                     { "tail_ms", config.tts.warp.tail_ms },
                     { "tail_drop", config.tts.warp.tail_drop },
@@ -275,6 +279,10 @@ bool loadAppConfig(const std::string& path, AppConfig& out_config, std::string& 
             if (auto wit = t.find("warp"); wit != t.end() && wit->is_object()) {
                 const json& w = *wit;
                 readIfPresent(w, "enabled", out_config.tts.warp.enabled);
+                readIfPresent(w, "pitch_shift_enabled", out_config.tts.warp.pitch_shift_enabled);
+                readIfPresent(w, "pitch_scale", out_config.tts.warp.pitch_scale);
+                readIfPresent(w, "low_pass_enabled", out_config.tts.warp.low_pass_enabled);
+                readIfPresent(w, "low_pass_cutoff_hz", out_config.tts.warp.low_pass_cutoff_hz);
                 readIfPresent(w, "lower_sentence_end_enabled", out_config.tts.warp.lower_sentence_end_enabled);
                 readIfPresent(w, "tail_ms", out_config.tts.warp.tail_ms);
                 readIfPresent(w, "tail_drop", out_config.tts.warp.tail_drop);

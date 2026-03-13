@@ -11,6 +11,10 @@ namespace {
         return std::max(-1.0f, std::min(1.0f, x));
     }
 
+    float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
     void applyLowerSentenceEnd(std::vector<float>& samples, int sample_rate, int tail_ms, float drop) {
         if (samples.empty() || sample_rate <= 0 || tail_ms <= 0 || drop <= 0.0f) {
             return;
@@ -86,6 +90,45 @@ namespace {
             s = clamp1(s * gain);
         }
     }
+
+    void applyPitchShiftResample(std::vector<float>& samples, float pitch_scale) {
+        if (samples.size() < 2 || pitch_scale <= 0.0f) {
+            return;
+        }
+
+        // pitch_scale < 1.0 => deeper
+        // 0.9 = slightly deeper
+        // 0.8 = noticeably deeper
+
+        std::vector<float> shifted;
+        shifted.reserve(static_cast<std::size_t>(samples.size() * pitch_scale) + 2);
+
+        for (float src = 0.0f; src < static_cast<float>(samples.size() - 1); src += 1.0f / pitch_scale) {
+            const int i0 = static_cast<int>(src);
+            const int i1 = std::min(i0 + 1, static_cast<int>(samples.size()) - 1);
+            const float frac = src - static_cast<float>(i0);
+            const float v = samples[i0] * (1.0f - frac) + samples[i1] * frac;
+            shifted.push_back(v);
+        }
+
+        samples = std::move(shifted);
+    }
+
+    void applyLowPass(std::vector<float>& samples, int sample_rate, float cutoff_hz) {
+        if (samples.empty() || sample_rate <= 0 || cutoff_hz <= 0.0f) {
+            return;
+        }
+
+        const float dt = 1.0f / static_cast<float>(sample_rate);
+        const float rc = 1.0f / (2.0f * kPi * cutoff_hz);
+        const float alpha = dt / (rc + dt);
+
+        float y = samples[0];
+        for (float& x : samples) {
+            y = y + alpha * (x - y);
+            x = y;
+        }
+    }
 }
 
 namespace VoiceEffects {
@@ -96,6 +139,14 @@ namespace VoiceEffects {
     ) {
         if (!config.enabled || samples.empty()) {
             return;
+        }
+
+        if (config.pitch_shift_enabled) {
+            applyPitchShiftResample(samples, config.pitch_scale);
+        }
+
+        if (config.low_pass_enabled) {
+            applyLowPass(samples, sample_rate, config.low_pass_cutoff_hz);
         }
 
         if (config.lower_sentence_end_enabled) {

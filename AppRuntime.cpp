@@ -440,7 +440,7 @@ bool AppRuntime::launchPendingSave() {
 
     game_renderer_->setLightingConfig(active_config_.lighting);
 
-    current_scene_id_ = "robot_missionary";
+    current_scene_id_ = "glados";
     if (!loadSceneById(current_scene_id_)) {
         std::cerr << "Failed to assemble PSD character.\n";
     }
@@ -450,13 +450,13 @@ bool AppRuntime::launchPendingSave() {
         if (!ids.empty()) {
             if (!setRoomById(active_config_.current_room, false)) {
                 std::cerr << "Failed to set configured room '" << active_config_.current_room
-                          << "', falling back to 'lab'.\n";
+                          << "', falling back to 'testing_chamber'.\n";
 
-                if (setRoomById("lab", false)) {
-                    active_config_.current_room = "lab";
+                if (setRoomById("testing_chamber", false)) {
+                    active_config_.current_room = "testing_chamber";
                     persistActiveConfig();
                 } else {
-                    std::cerr << "Failed to set fallback room 'lab'.\n";
+                    std::cerr << "Failed to set fallback room 'testing_chamber'.\n";
                     game_renderer_->clearBackgroundTexture();
                 }
             }

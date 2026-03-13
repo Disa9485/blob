@@ -43,6 +43,12 @@ struct LightingConfig {
 struct TtsWarpConfig {
     bool enabled = true;
 
+    bool pitch_shift_enabled = true;
+    float pitch_scale = 1.2;
+
+    bool low_pass_enabled = true;
+    int low_pass_cutoff_hz = 4000;
+
     bool lower_sentence_end_enabled = true;
     int tail_ms = 150;
     float tail_drop = 0.95f;

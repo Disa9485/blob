@@ -45,7 +45,7 @@ private:
     piper_synthesizer* m_synth = nullptr;
 
     int m_speaker_id = 0;
-    float m_length_scale = 1.0f;
+    float m_length_scale = 1.2f;
     float m_noise_scale = -1.0f;   // negative = use model default
     float m_noise_w_scale = -1.0f; // negative = use model default
 };
